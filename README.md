@@ -1,8 +1,13 @@
 # mcp.js
 
 Personal dev tool that exposes a local shell and filesystem to any Model
-Context Protocol client. Runs anywhere Node.js and bash run: Linux,
-macOS, and Windows via WSL or Git Bash.
+Context Protocol client. Built on the official TypeScript SDK
+([@modelcontextprotocol/sdk](https://github.com/modelcontextprotocol/typescript-sdk),
+v1.29+), with a custom WebSocket server transport added on top since the
+SDK only ships stdio and Streamable HTTP on the server side.
+
+Runs anywhere Node.js and bash run: Linux, macOS, and Windows via WSL
+or Git Bash.
 
 - llama.cpp Svelte WebUI (native MCP client)
 - OpenAI ChatGPT (web, custom MCP server)
