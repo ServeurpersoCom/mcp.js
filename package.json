@@ -16,10 +16,10 @@
 	"license": "ISC",
 	"type": "commonjs",
 	"dependencies": {
-		"@modelcontextprotocol/sdk": "^1.25.3",
-		"ws": "^8.19.0"
+		"@modelcontextprotocol/sdk": "^1.29.0",
+		"ws": "^8.20.0"
 	},
 	"devDependencies": {
-		"prettier": "^3.8.1"
+		"prettier": "^3.8.3"
 	}
 }
