@@ -1,8 +1,8 @@
 # mcp.js
 
-Personal dev tool that exposes a local Debian shell and filesystem to any
-Model Context Protocol client. I use it daily, along with a few friends,
-from:
+Personal dev tool that exposes a local shell and filesystem to any Model
+Context Protocol client. Runs anywhere Node.js and bash run: Linux,
+macOS, and Windows via WSL or Git Bash.
 
 - llama.cpp Svelte WebUI (native MCP client)
 - OpenAI ChatGPT (web, custom MCP server)
@@ -42,6 +42,8 @@ the public internet without all three of:
 Without these, assume you handed the host over.
 
 ## Install
+
+Requires Node.js 18+ and bash in PATH.
 
 ```bash
 git clone https://github.com/ServeurpersoCom/mcp.js
