@@ -1,0 +1,25 @@
+{
+	"name": "mcp-server",
+	"version": "1.0.0",
+	"description": "Serveur MCP pour bash local - by Pascal le Toutoufifieur",
+	"main": "stdio.js",
+	"directories": {
+		"lib": "lib"
+	},
+	"scripts": {
+		"format": "prettier --write \"**/*.{js,json}\"",
+		"format:check": "prettier --check \"**/*.{js,json}\"",
+		"test": "echo \"Error: no test specified\" && exit 1"
+	},
+	"keywords": [],
+	"author": "",
+	"license": "ISC",
+	"type": "commonjs",
+	"dependencies": {
+		"@modelcontextprotocol/sdk": "^1.25.3",
+		"ws": "^8.19.0"
+	},
+	"devDependencies": {
+		"prettier": "^3.8.1"
+	}
+}
