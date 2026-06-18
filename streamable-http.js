@@ -8,7 +8,7 @@ const MCPServer = require('./lib/server-core');
 const config = require('./config.json');
 const toolsModule = require('./lib/tools');
 const { createPromptsModule } = require('./lib/prompts');
-const { AUTH_ENABLED, verifyAuthHeader } = require('./lib/auth');
+const oauth = require('./lib/oauth');
 
 const promptsModule = createPromptsModule(config);
 
@@ -44,20 +44,14 @@ const httpServer = http.createServer(async (req, res) => {
 		return res.end();
 	}
 
-	// Bearer token check (MCP spec 2025-06-18, OAuth 2.0)
-	// Runs after CORS preflight so browsers can still negotiate
-	if (AUTH_ENABLED && !verifyAuthHeader(req.headers.authorization)) {
-		res.writeHead(401, {
-			'Content-Type': 'application/json',
-			'WWW-Authenticate': 'Bearer realm="MCP"'
-		});
-		return res.end(
-			JSON.stringify({
-				jsonrpc: '2.0',
-				error: { code: -32001, message: 'Unauthorized' },
-				id: null
-			})
-		);
+	// OAuth spoof endpoints (register / authorize / token), handled then done
+	if (await oauth.handle(req, res)) {
+		return;
+	}
+
+	// MCP endpoint requires a live access token, else a 401 discovery challenge
+	if (!oauth.guard(req, res)) {
+		return;
 	}
 
 	if (req.method === 'POST') {

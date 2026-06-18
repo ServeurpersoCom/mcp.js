@@ -29,27 +29,23 @@
 			]
 		}
 	],
-
 	"bash": {
 		"timeout": 300,
 		"outputLimitBytes": 4096
 	},
-
 	"auth": {
 		"enabled": false,
-		"token": ""
+		"clientId": "",
+		"clientSecret": ""
 	},
-
 	"streamable_http": {
 		"host": "0.0.0.0",
 		"port": 8083
 	},
-
 	"websocket": {
 		"host": "0.0.0.0",
 		"port": 8084
 	},
-
 	"mcp": {
 		"protocolVersion": "2025-06-18",
 		"serverName": "mcp-local-bash",
