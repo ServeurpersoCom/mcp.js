@@ -34,9 +34,10 @@
 		"outputLimitBytes": 4096
 	},
 	"auth": {
-		"enabled": false,
+		"mode": "none",
 		"clientId": "",
-		"clientSecret": ""
+		"clientSecret": "",
+		"staticToken": ""
 	},
 	"streamable_http": {
 		"host": "0.0.0.0",
