@@ -37,6 +37,7 @@
 		"mode": "none",
 		"clientId": "",
 		"clientSecret": "",
+		"password": "",
 		"staticToken": ""
 	},
 	"streamable_http": {
