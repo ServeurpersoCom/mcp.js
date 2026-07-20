@@ -31,7 +31,8 @@
 	],
 	"bash": {
 		"timeout": 300,
-		"outputLimitBytes": 4096
+		"outputLimitBytes": 4096,
+		"fileLimitBytes": 33554432
 	},
 	"auth": {
 		"mode": "none",
