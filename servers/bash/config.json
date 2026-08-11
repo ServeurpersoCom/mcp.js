@@ -33,14 +33,5 @@
 		"timeout": 300,
 		"outputLimitBytes": 4096,
 		"fileLimitBytes": 33554432
-	},
-	"streamable_http": {
-		"port": 8083
-	},
-	"websocket": {
-		"port": 8084
-	},
-	"mcp": {
-		"serverName": "mcp-local-bash"
 	}
 }

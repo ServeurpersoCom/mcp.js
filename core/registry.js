@@ -1,13 +1,16 @@
 /**
  * Server registry
- * Resolves a server by name under servers/, loads its configuration, its tools
- * module and the prompts built from that configuration
+ * Aggregates every server under servers/ into the single bundle a transport
+ * binds to, so one endpoint carries the tools and prompts of them all
  * A server directory holds config.json, tools.json and lib/tools.js, so adding
  * a server never touches the core
  *
- * The configuration is the root config.json overridden by the one of the server,
- * section by section, so credentials and protocol settings are written once and
- * a server only carries what makes it itself
+ * The two configuration files hold disjoint things: the root config.json owns
+ * the transport, the credentials and the identity the aggregate answers with,
+ * a server config.json owns its prompts and its own settings block
+ *
+ * Two servers exposing the same tool or prompt name is a mistake in naming, and
+ * the registry says so at startup rather than picking a winner
  */
 
 const fs = require('fs');
@@ -17,28 +20,6 @@ const { createPromptsModule } = require('./prompts');
 const SERVERS_DIR = path.join(__dirname, '..', 'servers');
 const ROOT_CONFIG = path.join(__dirname, '..', 'config.json');
 const NAME_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
-
-/**
- * Merge a server configuration over the root defaults
- * Sections merge key by key, anything else is replaced, so a server never
- * inherits half of an array such as prompts or serverIcons
- * @param {object} defaults - Root configuration
- * @param {object} overrides - Server configuration
- * @returns {object}
- */
-function mergeConfig(defaults, overrides) {
-	const merged = { ...defaults };
-
-	for (const [key, value] of Object.entries(overrides)) {
-		const base = merged[key];
-		const isSection = (candidate) =>
-			candidate !== null && typeof candidate === 'object' && !Array.isArray(candidate);
-
-		merged[key] = isSection(base) && isSection(value) ? { ...base, ...value } : value;
-	}
-
-	return merged;
-}
 
 /**
  * List the server names available under servers/
@@ -53,35 +34,68 @@ function listServers() {
 }
 
 /**
- * Load a server bundle ready to be handed to a transport
+ * Load every server, aggregated into one bundle ready to be handed to a
+ * transport
  * The logger carries the configured server name so transports stay generic
- * @param {string} name - Directory name under servers/
- * @returns {{name: string, dir: string, config: object, toolsModule: object, promptsModule: object, log: function}}
+ * @returns {{names: string[], config: object, toolsModule: object, promptsModule: object, log: function}}
  */
-function loadServer(name) {
-	if (!NAME_PATTERN.test(name || '')) {
-		throw new Error(`Invalid server name "${name}"`);
+function loadServers() {
+	const names = listServers();
+	if (names.length === 0) {
+		throw new Error(`No server found in ${SERVERS_DIR}`);
 	}
 
-	const dir = path.join(SERVERS_DIR, name);
-	if (!fs.existsSync(path.join(dir, 'config.json'))) {
-		throw new Error(`Server "${name}" has no config.json in ${dir}`);
+	const config = require(ROOT_CONFIG);
+
+	const definitions = [];
+	const mapping = {};
+	const prompts = [];
+	const toolOwner = {};
+	const promptOwner = {};
+
+	for (const name of names) {
+		const dir = path.join(SERVERS_DIR, name);
+		if (!fs.existsSync(path.join(dir, 'config.json'))) {
+			throw new Error(`Server "${name}" has no config.json in ${dir}`);
+		}
+
+		const serverConfig = require(path.join(dir, 'config.json'));
+		const toolsModule = require(path.join(dir, 'lib', 'tools.js'));
+
+		for (const definition of toolsModule.TOOLS_DEFINITIONS) {
+			if (toolOwner[definition.name]) {
+				throw new Error(
+					`Tool "${definition.name}" is exposed by both "${toolOwner[definition.name]}" and "${name}"`
+				);
+			}
+			toolOwner[definition.name] = name;
+			definitions.push(definition);
+		}
+
+		for (const [tool, handler] of Object.entries(toolsModule.TOOLS_MAPPING)) {
+			mapping[tool] = handler;
+		}
+
+		for (const prompt of serverConfig.prompts || []) {
+			if (promptOwner[prompt.name]) {
+				throw new Error(
+					`Prompt "${prompt.name}" is declared by both "${promptOwner[prompt.name]}" and "${name}"`
+				);
+			}
+			promptOwner[prompt.name] = name;
+			prompts.push(prompt);
+		}
 	}
 
-	const defaults = fs.existsSync(ROOT_CONFIG) ? require(ROOT_CONFIG) : {};
-	const config = mergeConfig(defaults, require(path.join(dir, 'config.json')));
-	const toolsModule = require(path.join(dir, 'lib', 'tools.js'));
-	const promptsModule = createPromptsModule(config);
 	const label = `[${config.mcp.serverName}]`;
 
 	return {
-		name,
-		dir,
+		names,
 		config,
-		toolsModule,
-		promptsModule,
+		toolsModule: { TOOLS_DEFINITIONS: definitions, TOOLS_MAPPING: mapping },
+		promptsModule: createPromptsModule({ prompts }),
 		log: (message) => console.error(`${label} ${message}`)
 	};
 }
 
-module.exports = { listServers, loadServer };
+module.exports = { listServers, loadServers };

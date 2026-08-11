@@ -14,8 +14,8 @@ or Git Bash.
 - Anthropic Claude (web, custom MCP server)
 
 Four tools (`bash_tool`, `view`, `create_file`, `str_replace`), three
-transports (stdio, Streamable HTTP, WebSocket), shared defaults in one
-root config file, zero framework.
+transports (stdio, Streamable HTTP, WebSocket), every server aggregated
+behind one endpoint, zero framework.
 
 ## Warning
 
@@ -59,27 +59,31 @@ npm install
 ## Layout
 
 ```
-config.json      shared defaults every server inherits
+config.json      transport, credentials, and the identity served
 core/            protocol, auth, and the three transports
 core/transports/ stdio, Streamable HTTP, WebSocket
 servers/bash/    the bash server: config.json, tools.json, lib/
-main.js          binds one server to one transport
+main.js          binds every server to one transport
 ```
 
-A server owns its configuration, its tool schemas and its
-implementation, and nothing else. Adding one means adding a directory
-under `servers/`, never touching `core/`.
+Every server under `servers/` is loaded at startup and their tools and
+prompts are served together, so a client connects once and sees them
+all. Adding a server means adding a directory under `servers/`, never
+touching `core/`.
+
+Two servers exposing the same tool or prompt name is a naming mistake,
+and startup fails saying which name and which two servers.
 
 ## Run
 
 ```bash
-node main.js bash stdio              # local MCP clients
-node main.js bash streamable-http    # HTTP, default port 8083
-node main.js bash websocket          # WebSocket, default port 8084
+node main.js stdio              # local MCP clients
+node main.js streamable-http    # HTTP, port 8083
+node main.js websocket          # WebSocket, port 8084
 ```
 
-`main.js` takes a server name and a transport name. The transport
-defaults to `stdio`. Run it with no argument to list what is available.
+`main.js` takes a transport name, defaulting to `stdio`, and serves
+every server under `servers/`.
 
 ### Network exposure
 
@@ -92,12 +96,12 @@ even then, re-read the Warning section first.
 
 ## Config
 
-Settings come from two files. The root `config.json` holds what every
-server shares, `servers/<name>/config.json` holds what makes a server
-itself. The server file wins, section by section, so overriding one key
-leaves the rest of the section in place.
+Settings come from two files with disjoint roles. The root `config.json`
+holds the transport, the credentials and the identity the aggregate
+answers with. A `servers/<name>/config.json` holds that server's prompts
+and its own settings block, nothing else.
 
-Root defaults:
+Root:
 
 ```json
 {
@@ -108,10 +112,11 @@ Root defaults:
 		"password": "",
 		"staticToken": ""
 	},
-	"streamable_http": { "host": "0.0.0.0" },
-	"websocket": { "host": "0.0.0.0" },
+	"streamable_http": { "host": "0.0.0.0", "port": 8083 },
+	"websocket": { "host": "0.0.0.0", "port": 8084 },
 	"mcp": {
 		"protocolVersion": "2025-06-18",
+		"serverName": "mcp-bash",
 		"serverVersion": "1.0.0",
 		"serverIcons": [
 			{ "src": "https://example.com/favicon-light.png", "mimeType": "image/png", "theme": "light" },
@@ -121,29 +126,24 @@ Root defaults:
 }
 ```
 
-The bash server on top of them:
+The bash server:
 
 ```json
 {
+	"prompts": [],
 	"bash": {
 		"timeout": 300,
 		"outputLimitBytes": 4096,
 		"fileLimitBytes": 33554432
-	},
-	"streamable_http": { "port": 8083 },
-	"websocket": { "port": 8084 },
-	"mcp": { "serverName": "mcp-local-bash" }
+	}
 }
 ```
 
-Ports and `serverName` stay with the server, they are what tells one
-apart from another. Credentials and protocol settings are written once.
-
-`prompts` holds the prompt templates the server publishes over
-`prompts/list` and `prompts/get`. `serverIcons` is optional and rides
-verbatim into the `initialize` response. Arrays replace rather than
-merge, so a server that declares `prompts` or `serverIcons` never
-inherits half of the root list.
+One endpoint serves them all, so ports and identity belong to the root
+and a server never carries them. `prompts` holds the templates the
+server publishes over `prompts/list` and `prompts/get`, gathered from
+every server. `serverIcons` is optional and rides verbatim into the
+`initialize` response.
 
 ### Auth
 
@@ -217,7 +217,7 @@ same URL and Authorization header.
 	"mcpServers": {
 		"mcp": {
 			"command": "node",
-			"args": ["/path/to/mcp.js/main.js", "bash", "stdio"]
+			"args": ["/path/to/mcp.js/main.js", "stdio"]
 		}
 	}
 }
