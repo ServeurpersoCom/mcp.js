@@ -11,6 +11,9 @@
  *
  * Two servers exposing the same tool or prompt name is a mistake in naming, and
  * the registry says so at startup rather than picking a winner
+ *
+ * A tool is served when its server declares it in tools.json, the handler being
+ * looked up from that declaration
  */
 
 const fs = require('fs');
@@ -37,7 +40,7 @@ function listServers() {
  * Load every server, aggregated into one bundle ready to be handed to a
  * transport
  * The logger carries the configured server name so transports stay generic
- * @returns {{names: string[], config: object, toolsModule: object, promptsModule: object, log: function}}
+ * @returns {{config: object, toolsModule: object, promptsModule: object, log: function}}
  */
 function loadServers() {
 	const names = listServers();
@@ -70,10 +73,7 @@ function loadServers() {
 			}
 			toolOwner[definition.name] = name;
 			definitions.push(definition);
-		}
-
-		for (const [tool, handler] of Object.entries(toolsModule.TOOLS_MAPPING)) {
-			mapping[tool] = handler;
+			mapping[definition.name] = toolsModule.TOOLS_MAPPING[definition.name];
 		}
 
 		for (const prompt of serverConfig.prompts || []) {
@@ -90,12 +90,11 @@ function loadServers() {
 	const label = `[${config.mcp.serverName}]`;
 
 	return {
-		names,
 		config,
 		toolsModule: { TOOLS_DEFINITIONS: definitions, TOOLS_MAPPING: mapping },
-		promptsModule: createPromptsModule({ prompts }),
+		promptsModule: createPromptsModule(prompts),
 		log: (message) => console.error(`${label} ${message}`)
 	};
 }
 
-module.exports = { listServers, loadServers };
+module.exports = { loadServers };
