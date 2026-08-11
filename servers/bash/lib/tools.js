@@ -139,9 +139,13 @@ async function tool_view(args = {}) {
 		const script = `find ${escapeShell(filepath)} -maxdepth 2 ! -path '*/.*' ! -path '*/node_modules/*' -exec du -sh {} \\; 2>/dev/null | sort -k2`;
 		const result = await bashExec(script);
 
-		const marker = result.truncated ? `⚠️ Listing tail shown, ${result.stdoutTotalBytes} bytes total\n` : '';
+		const marker = result.truncated
+			? `⚠️ Listing tail shown, ${result.stdoutTotalBytes} bytes total\n`
+			: '';
 		const justification = args.description ? `🎯 ${args.description}\n` : '';
-		return textResult(result.stdout + marker + `${justification}👁️ Directory listing of ${filepath}`);
+		return textResult(
+			result.stdout + marker + `${justification}👁️ Directory listing of ${filepath}`
+		);
 	}
 
 	const mimeScript = `file --mime-encoding ${escapeShell(filepath)} 2>/dev/null`;
@@ -301,7 +305,10 @@ async function tool_str_replace(args = {}) {
 	}
 
 	if (readResult.truncated) {
-		return textResult(`❌ File ${filepath} exceeds ${config.bash.fileLimitBytes} bytes, refusing partial rewrite`, true);
+		return textResult(
+			`❌ File ${filepath} exceeds ${config.bash.fileLimitBytes} bytes, refusing partial rewrite`,
+			true
+		);
 	}
 
 	const content = readResult.stdout;

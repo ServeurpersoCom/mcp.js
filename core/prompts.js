@@ -1,5 +1,5 @@
 /**
- * Prompts module for bash MCP server
+ * Prompts module shared by every server
  * Loads prompt definitions from config.json
  */
 

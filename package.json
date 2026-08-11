@@ -1,20 +1,16 @@
 {
-	"name": "mcp-server",
+	"name": "mcp.js",
 	"version": "1.0.0",
-	"description": "Serveur MCP pour bash local",
-	"main": "stdio.js",
-	"directories": {
-		"lib": "lib"
-	},
-	"scripts": {
-		"format": "prettier --write \"**/*.{js,json}\"",
-		"format:check": "prettier --check \"**/*.{js,json}\"",
-		"test": "echo \"Error: no test specified\" && exit 1"
-	},
-	"keywords": [],
-	"author": "",
-	"license": "ISC",
+	"description": "MCP server exposing a local shell and filesystem",
+	"main": "main.js",
 	"type": "commonjs",
+	"license": "ISC",
+	"author": "",
+	"keywords": [],
+	"scripts": {
+		"format": "prettier --write \"**/*.{js,json,md}\"",
+		"format:check": "prettier --check \"**/*.{js,json,md}\""
+	},
 	"dependencies": {
 		"@modelcontextprotocol/sdk": "^1.29.0",
 		"ws": "^8.20.0"
