@@ -34,28 +34,13 @@
 		"outputLimitBytes": 4096,
 		"fileLimitBytes": 33554432
 	},
-	"auth": {
-		"mode": "none",
-		"clientId": "",
-		"clientSecret": "",
-		"password": "",
-		"staticToken": ""
-	},
 	"streamable_http": {
-		"host": "0.0.0.0",
 		"port": 8083
 	},
 	"websocket": {
-		"host": "0.0.0.0",
 		"port": 8084
 	},
 	"mcp": {
-		"protocolVersion": "2025-06-18",
-		"serverName": "mcp-local-bash",
-		"serverVersion": "1.0.0",
-		"serverIcons": [
-			{ "src": "https://example.com/favicon-light.png", "mimeType": "image/png", "theme": "light" },
-			{ "src": "https://example.com/favicon-dark.png", "mimeType": "image/png", "theme": "dark" }
-		]
+		"serverName": "mcp-local-bash"
 	}
 }

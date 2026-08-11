@@ -1,0 +1,23 @@
+{
+	"auth": {
+		"mode": "none",
+		"clientId": "",
+		"clientSecret": "",
+		"password": "",
+		"staticToken": ""
+	},
+	"streamable_http": {
+		"host": "0.0.0.0"
+	},
+	"websocket": {
+		"host": "0.0.0.0"
+	},
+	"mcp": {
+		"protocolVersion": "2025-06-18",
+		"serverVersion": "1.0.0",
+		"serverIcons": [
+			{ "src": "https://example.com/favicon-light.png", "mimeType": "image/png", "theme": "light" },
+			{ "src": "https://example.com/favicon-dark.png", "mimeType": "image/png", "theme": "dark" }
+		]
+	}
+}

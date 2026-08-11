@@ -14,8 +14,8 @@ or Git Bash.
 - Anthropic Claude (web, custom MCP server)
 
 Four tools (`bash_tool`, `view`, `create_file`, `str_replace`), three
-transports (stdio, Streamable HTTP, WebSocket), one config file per
-server, zero framework.
+transports (stdio, Streamable HTTP, WebSocket), shared defaults in one
+root config file, zero framework.
 
 ## Warning
 
@@ -40,7 +40,7 @@ configuration.
 Never expose the HTTP or WebSocket transport on a port reachable from
 the public internet without all three of:
 
-- `auth.mode` set to something other than `none` in `servers/bash/config.json`
+- `auth.mode` set to something other than `none` in `config.json`
 - HTTPS in front (reverse proxy)
 - an IP allowlist at the firewall level
 
@@ -59,6 +59,7 @@ npm install
 ## Layout
 
 ```
+config.json      shared defaults every server inherits
 core/            protocol, auth, and the three transports
 core/transports/ stdio, Streamable HTTP, WebSocket
 servers/bash/    the bash server: config.json, tools.json, lib/
@@ -85,21 +86,21 @@ defaults to `stdio`. Run it with no argument to list what is available.
 Default bind address is `0.0.0.0` so a llama.cpp instance on your
 desktop can reach a sandbox running on a Raspberry Pi across the LAN
 without any config tweak. If you run everything on a single machine,
-set `host` to `127.0.0.1` in `servers/bash/config.json`. Do not expose the ports on
+set `host` to `127.0.0.1` in `config.json`. Do not expose the ports on
 the public internet unless you know exactly what you are doing, and
 even then, re-read the Warning section first.
 
 ## Config
 
-All settings live in `servers/bash/config.json`.
+Settings come from two files. The root `config.json` holds what every
+server shares, `servers/<name>/config.json` holds what makes a server
+itself. The server file wins, section by section, so overriding one key
+leaves the rest of the section in place.
+
+Root defaults:
 
 ```json
 {
-	"bash": {
-		"timeout": 300,
-		"outputLimitBytes": 4096,
-		"fileLimitBytes": 33554432
-	},
 	"auth": {
 		"mode": "none",
 		"clientId": "",
@@ -107,11 +108,10 @@ All settings live in `servers/bash/config.json`.
 		"password": "",
 		"staticToken": ""
 	},
-	"streamable_http": { "host": "0.0.0.0", "port": 8083 },
-	"websocket": { "host": "0.0.0.0", "port": 8084 },
+	"streamable_http": { "host": "0.0.0.0" },
+	"websocket": { "host": "0.0.0.0" },
 	"mcp": {
 		"protocolVersion": "2025-06-18",
-		"serverName": "mcp-local-bash",
 		"serverVersion": "1.0.0",
 		"serverIcons": [
 			{ "src": "https://example.com/favicon-light.png", "mimeType": "image/png", "theme": "light" },
@@ -121,9 +121,29 @@ All settings live in `servers/bash/config.json`.
 }
 ```
 
+The bash server on top of them:
+
+```json
+{
+	"bash": {
+		"timeout": 300,
+		"outputLimitBytes": 4096,
+		"fileLimitBytes": 33554432
+	},
+	"streamable_http": { "port": 8083 },
+	"websocket": { "port": 8084 },
+	"mcp": { "serverName": "mcp-local-bash" }
+}
+```
+
+Ports and `serverName` stay with the server, they are what tells one
+apart from another. Credentials and protocol settings are written once.
+
 `prompts` holds the prompt templates the server publishes over
 `prompts/list` and `prompts/get`. `serverIcons` is optional and rides
-verbatim into the `initialize` response.
+verbatim into the `initialize` response. Arrays replace rather than
+merge, so a server that declares `prompts` or `serverIcons` never
+inherits half of the root list.
 
 ### Auth
 
