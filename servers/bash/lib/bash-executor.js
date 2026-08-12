@@ -109,17 +109,7 @@ function escapeShell(arg) {
 	return "'" + arg.replace(/'/g, "'\"'\"'") + "'";
 }
 
-/**
- * Escape regex special characters
- * @param {string} str - String to escape
- * @returns {string} Escaped string
- */
-function escapeRegex(str) {
-	return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 module.exports = {
 	bashExec,
-	escapeShell,
-	escapeRegex
+	escapeShell
 };

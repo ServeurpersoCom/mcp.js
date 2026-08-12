@@ -37,7 +37,7 @@
 const fs = require('fs');
 const path = require('path');
 const config = require('../config.json');
-const { bashExec, escapeShell, escapeRegex } = require('./bash-executor');
+const { bashExec, escapeShell } = require('./bash-executor');
 const { textResult, imageResult } = require('../../../core/tool-result');
 
 // Load tools definitions from tools.json once at startup
@@ -48,6 +48,28 @@ const TOOLS_DEFINITIONS = rawDefinitions.map((tool) => ({
 	description: tool.function.description,
 	inputSchema: tool.function.parameters
 }));
+
+/**
+ * Keep the tail of a text over the output limit, cut on a line boundary, with
+ * a marker saying how many bytes of the full output stay out of context
+ * @param {string} text
+ * @param {number} totalBytes - Size of the full output the text comes from
+ * @returns {string}
+ */
+function truncateTail(text, totalBytes) {
+	if (text.length <= config.bash.outputLimitBytes) {
+		return text;
+	}
+
+	let tail = text.slice(-config.bash.outputLimitBytes);
+
+	const firstNewline = tail.indexOf('\n');
+	if (firstNewline !== -1 && firstNewline < 512) {
+		tail = tail.slice(firstNewline + 1);
+	}
+
+	return tail + `\n⚠️ Long output with ${totalBytes - tail.length} bytes hidden from context`;
+}
 
 /**
  * Tool: bash_tool
@@ -71,23 +93,11 @@ async function tool_bash(args = {}) {
 	const result = await bashExec(cmd);
 	const elapsed = Date.now() - t0;
 
-	let output = result.stdout.replace(/\n$/, '');
-
-	if (output.length > config.bash.outputLimitBytes) {
-		let tail = output.slice(-config.bash.outputLimitBytes);
-
-		const firstNewline = tail.indexOf('\n');
-		if (firstNewline !== -1 && firstNewline < 512) {
-			tail = tail.slice(firstNewline + 1);
-		}
-
-		const truncatedBytes = result.stdoutTotalBytes - tail.length;
-		output = tail + `\n⚠️ Long output with ${truncatedBytes} bytes hidden from context`;
-	}
+	const output = truncateTail(result.stdout.replace(/\n$/, ''), result.stdoutTotalBytes);
 
 	const statusEmoji = result.exitCode === 0 ? '✅' : '❌';
 	const newLine = output ? '\n' : '';
-	const justification = args.description ? `🎯 ${args.description}\n` : '';
+	const justification = `🎯 ${args.description}\n`;
 	return textResult(
 		`${output}${newLine}${justification}#️⃣ ${cmd}\n${statusEmoji} Exit code ${result.exitCode} (${elapsed} ms)`,
 		result.exitCode !== 0
@@ -126,7 +136,7 @@ async function tool_view(args = {}) {
 		const marker = result.truncated
 			? `⚠️ Listing tail shown, ${result.stdoutTotalBytes} bytes total\n`
 			: '';
-		const justification = args.description ? `🎯 ${args.description}\n` : '';
+		const justification = `🎯 ${args.description}\n`;
 		return textResult(
 			result.stdout + marker + `${justification}👁️ Directory listing of ${filepath}`
 		);
@@ -192,26 +202,15 @@ async function tool_view(args = {}) {
 
 	const selectedLines = lines.slice(startLine - 1, endLine);
 
-	let numberedLines = selectedLines
+	const numbered = selectedLines
 		.map((line, idx) => {
 			const lineNum = startLine + idx;
 			return `${lineNum}\t${line}`;
 		})
 		.join('\n');
+	const numberedLines = truncateTail(numbered, numbered.length);
 
-	if (numberedLines.length > config.bash.outputLimitBytes) {
-		let tail = numberedLines.slice(-config.bash.outputLimitBytes);
-
-		const firstNewline = tail.indexOf('\n');
-		if (firstNewline !== -1 && firstNewline < 512) {
-			tail = tail.slice(firstNewline + 1);
-		}
-
-		const truncatedBytes = numberedLines.length - tail.length;
-		numberedLines = tail + `\n⚠️ Long output with ${truncatedBytes} bytes hidden from context`;
-	}
-
-	const justification = args.description ? `🎯 ${args.description}\n` : '';
+	const justification = `🎯 ${args.description}\n`;
 	if (range && Array.isArray(range) && range.length === 2) {
 		return textResult(
 			`${numberedLines}\n${justification}👁️ File content of ${filepath} (lines ${startLine}-${endLine} out of ${totalLines})`
@@ -253,8 +252,8 @@ async function tool_create_file(args = {}) {
 		return textResult(result.stdout + `❌ Error creating file ${filepath}`, true);
 	}
 
-	const size = content.length;
-	const justification = args.description ? `🎯 ${args.description}\n` : '';
+	const size = Buffer.byteLength(content);
+	const justification = `🎯 ${args.description}\n`;
 	return textResult(`${justification}✨ File ${filepath} created (${size} bytes)`);
 }
 
@@ -296,20 +295,21 @@ async function tool_str_replace(args = {}) {
 	}
 
 	const content = readResult.stdout;
-	const occurrences = (content.match(new RegExp(escapeRegex(oldStr), 'g')) || []).length;
+	const at = content.indexOf(oldStr);
 
-	if (occurrences === 0) {
+	if (at < 0) {
 		return textResult(`❌ String "${oldStr}" not found in ${filepath}`, true);
 	}
 
-	if (occurrences > 1) {
+	const end = at + oldStr.length;
+	if (content.indexOf(oldStr, end) >= 0) {
 		return textResult(
-			`❌ String "${oldStr}" found ${occurrences} times in ${filepath} (must be unique)`,
+			`❌ String "${oldStr}" found ${content.split(oldStr).length - 1} times in ${filepath} (must be unique)`,
 			true
 		);
 	}
 
-	const newContent = content.replace(oldStr, newStr);
+	const newContent = content.slice(0, at) + newStr + content.slice(end);
 	const b64 = Buffer.from(newContent).toString('base64');
 	const writeScript = `echo '${b64}' | base64 -d > ${escapeShell(filepath)}`;
 	const writeResult = await bashExec(writeScript);
@@ -318,9 +318,9 @@ async function tool_str_replace(args = {}) {
 		return textResult(writeResult.stdout + `❌ Error writing file ${filepath}`, true);
 	}
 
-	const oldLen = oldStr.length;
-	const newLen = newStr.length;
-	const justification = args.description ? `🎯 ${args.description}\n` : '';
+	const oldLen = Buffer.byteLength(oldStr);
+	const newLen = Buffer.byteLength(newStr);
+	const justification = `🎯 ${args.description}\n`;
 	return textResult(
 		`${justification}🔄 Replacement done in ${filepath} (${oldLen} -> ${newLen} bytes)`
 	);

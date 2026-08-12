@@ -13,7 +13,8 @@
  * the registry says so at startup rather than picking a winner
  *
  * A tool is served when its server declares it in tools.json, the handler being
- * looked up from that declaration
+ * looked up from that declaration, and a declaration without a handler fails at
+ * startup too
  */
 
 const fs = require('fs');
@@ -70,6 +71,9 @@ function loadServers() {
 				throw new Error(
 					`Tool "${definition.name}" is exposed by both "${toolOwner[definition.name]}" and "${name}"`
 				);
+			}
+			if (typeof toolsModule.TOOLS_MAPPING[definition.name] !== 'function') {
+				throw new Error(`Tool "${definition.name}" is declared by "${name}" but has no handler`);
 			}
 			toolOwner[definition.name] = name;
 			definitions.push(definition);
