@@ -38,23 +38,7 @@ const fs = require('fs');
 const path = require('path');
 const config = require('../config.json');
 const { bashExec, escapeShell, escapeRegex } = require('./bash-executor');
-
-function textResult(text, isError = false) {
-	return {
-		type: 'text',
-		text: text == null ? '' : String(text),
-		isError: Boolean(isError)
-	};
-}
-
-function imageResult(data, mimeType, isError = false) {
-	return {
-		type: 'image',
-		data: data == null ? '' : String(data),
-		mimeType: mimeType || 'application/octet-stream',
-		isError: Boolean(isError)
-	};
-}
+const { textResult, imageResult } = require('../../../core/tool-result');
 
 // Load tools definitions from tools.json once at startup
 const toolsDefinitionPath = path.join(__dirname, '..', 'tools.json');
