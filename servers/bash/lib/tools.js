@@ -257,6 +257,8 @@ async function tool_create_file(args = {}) {
 	return textResult(`${justification}✨ File ${filepath} created (${size} bytes)`);
 }
 
+const STR_REPLACE_KEYS = ['description', 'path', 'old_str', 'new_str'];
+
 /**
  * Tool: str_replace
  * Replace unique string in file with validation and base64-safe write
@@ -270,6 +272,16 @@ async function tool_str_replace(args = {}) {
 	const filepath = args.path?.trim();
 	const oldStr = args.old_str;
 	const newStr = args.new_str ?? '';
+
+	// An unknown key carries the replacement when its name is wrong, and
+	// the omitted new_str would delete old_str instead
+	const unknown = Object.keys(args).filter((key) => !STR_REPLACE_KEYS.includes(key));
+	if (unknown.length > 0) {
+		return textResult(
+			`❌ Unknown argument ${unknown.join(', ')} in ${filepath}, the replacement goes in new_str`,
+			true
+		);
+	}
 
 	if (!filepath || oldStr === undefined) {
 		return textResult('❌ Path and old_str arguments required', true);
