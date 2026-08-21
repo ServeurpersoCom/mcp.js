@@ -4,7 +4,8 @@
 		"clientId": "",
 		"clientSecret": "",
 		"password": "",
-		"staticToken": ""
+		"staticToken": "",
+		"storeDir": "data/oauth"
 	},
 	"streamable_http": {
 		"host": "0.0.0.0",

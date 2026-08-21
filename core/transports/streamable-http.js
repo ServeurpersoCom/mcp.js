@@ -1,19 +1,28 @@
 /**
  * Streamable HTTP transport
- * One server instance per MCP session, sessions keyed by the Mcp-Session-Id
- * header, guarded by the OAuth module built from the server configuration
+ * One server instance and one transport per POST, so a JSON-RPC id maps to the
+ * stream of its own request and to nothing else, guarded by the OAuth module
+ * built from the server configuration
+ * The endpoint carries no session: an Mcp-Session-Id sent by a client is
+ * ignored, GET and DELETE answer 405, and a restart stays invisible to clients
  */
 
 const http = require('http');
-const { randomUUID } = require('crypto');
 const {
 	StreamableHTTPServerTransport
 } = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
 const MCPServer = require('../server-core');
 const { createOAuth } = require('../oauth');
 
-const isInitializeRequest = (body) => {
-	return body && body.method === 'initialize';
+const sendJsonError = (res, status, code, message, headers = {}) => {
+	res.writeHead(status, { 'Content-Type': 'application/json', ...headers });
+	res.end(JSON.stringify({ jsonrpc: '2.0', error: { code, message }, id: null }));
+};
+
+// One log line per POST, method and id only, arguments stay out of the log
+const describe = (message) => {
+	const first = Array.isArray(message) ? message[0] : message;
+	return `${first?.method ?? 'message'} id=${first?.id ?? '-'}`;
 };
 
 /**
@@ -30,21 +39,13 @@ function start(server) {
 	log(`Tools available: ${toolsModule.TOOLS_DEFINITIONS.length}`);
 	log(`Prompts available: ${promptsModule.PROMPTS_DEFINITIONS.length}`);
 
-	const transports = {};
-
-	const createServer = () => {
-		const mcpServer = new MCPServer(config, toolsModule, promptsModule);
-		return mcpServer.getServer();
-	};
-
 	const httpServer = http.createServer(async (req, res) => {
 		res.setHeader('Access-Control-Allow-Origin', '*');
-		res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+		res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
 		res.setHeader(
 			'Access-Control-Allow-Headers',
 			'Content-Type, Authorization, Mcp-Session-Id, MCP-Protocol-Version, Accept'
 		);
-		res.setHeader('Access-Control-Expose-Headers', 'Mcp-Session-Id');
 
 		if (req.method === 'OPTIONS') {
 			res.writeHead(204);
@@ -61,114 +62,44 @@ function start(server) {
 			return;
 		}
 
-		if (req.method === 'POST') {
-			let body = '';
-			req.on('data', (chunk) => (body += chunk.toString()));
-			req.on('end', async () => {
-				let parsedBody;
-				try {
-					parsedBody = JSON.parse(body);
-				} catch (e) {
-					res.writeHead(400, { 'Content-Type': 'application/json' });
-					return res.end(JSON.stringify({ error: 'Invalid JSON' }));
-				}
+		// The endpoint serves JSON-RPC over POST alone, which the MCP spec allows a
+		// server offering neither a standalone SSE stream nor session termination
+		if (req.method !== 'POST') {
+			return sendJsonError(res, 405, -32000, 'Method Not Allowed', { Allow: 'POST' });
+		}
 
-				const sessionId = req.headers['mcp-session-id'];
-				let transport;
+		let body = '';
+		req.on('data', (chunk) => (body += chunk.toString()));
+		req.on('end', async () => {
+			let parsedBody;
+			try {
+				parsedBody = JSON.parse(body);
+			} catch (e) {
+				return sendJsonError(res, 400, -32700, 'Parse error: Invalid JSON');
+			}
 
-				if (sessionId && transports[sessionId]) {
-					transport = transports[sessionId];
-				} else if (!sessionId && isInitializeRequest(parsedBody)) {
-					transport = new StreamableHTTPServerTransport({
-						sessionIdGenerator: () => randomUUID(),
-						onsessioninitialized: (sid) => {
-							log(`Session ${sid} initialized (${Object.keys(transports).length + 1} active)`);
-							transports[sid] = transport;
-						}
-					});
+			log(`${describe(parsedBody)} from ${req.socket.remoteAddress}`);
 
-					transport.onclose = () => {
-						const sid = transport.sessionId;
-						if (sid && transports[sid]) {
-							log(`Session ${sid} closed (${Object.keys(transports).length - 1} active)`);
-							delete transports[sid];
-						}
-					};
+			const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+			const mcpServer = new MCPServer(config, toolsModule, promptsModule);
+			const instance = mcpServer.getServer();
 
-					const instance = createServer();
-					await instance.connect(transport);
-					await transport.handleRequest(req, res, parsedBody);
-					return;
-				} else if (sessionId && !transports[sessionId]) {
-					// Session ID provided but unknown (server restarted)
-					// MCP spec mandates 404 so the client reinitializes
-					res.writeHead(404, { 'Content-Type': 'application/json' });
-					return res.end(
-						JSON.stringify({
-							jsonrpc: '2.0',
-							error: { code: -32600, message: 'Session not found' },
-							id: null
-						})
-					);
-				} else {
-					// No session ID on a non initialize request, MCP spec returns 400
-					res.writeHead(400, { 'Content-Type': 'application/json' });
-					return res.end(
-						JSON.stringify({
-							jsonrpc: '2.0',
-							error: { code: -32000, message: 'Bad Request: Mcp-Session-Id required' },
-							id: null
-						})
-					);
-				}
-
-				await transport.handleRequest(req, res, parsedBody);
+			// Closing the server closes the transport it carries, so the pair dies
+			// with the response whether it completed or the client went away
+			res.on('close', () => {
+				instance.close();
 			});
-			return;
-		}
 
-		if (req.method === 'GET') {
-			const sessionId = req.headers['mcp-session-id'];
-
-			if (!sessionId) {
-				res.writeHead(400, { 'Content-Type': 'application/json' });
-				return res.end(
-					JSON.stringify({
-						jsonrpc: '2.0',
-						error: { code: -32000, message: 'Bad Request: Mcp-Session-Id required' },
-						id: null
-					})
-				);
+			try {
+				await instance.connect(transport);
+				await transport.handleRequest(req, res, parsedBody);
+			} catch (error) {
+				log(`Request failed: ${error.message}`);
+				if (!res.headersSent) {
+					sendJsonError(res, 500, -32603, 'Internal error');
+				}
 			}
-
-			if (!transports[sessionId]) {
-				res.writeHead(404, { 'Content-Type': 'application/json' });
-				return res.end(
-					JSON.stringify({
-						jsonrpc: '2.0',
-						error: { code: -32600, message: 'Session not found' },
-						id: null
-					})
-				);
-			}
-
-			await transports[sessionId].handleRequest(req, res);
-			return;
-		}
-
-		if (req.method === 'DELETE') {
-			const sessionId = req.headers['mcp-session-id'];
-
-			if (sessionId && transports[sessionId]) {
-				await transports[sessionId].close();
-			}
-
-			res.writeHead(200);
-			return res.end();
-		}
-
-		res.writeHead(405);
-		res.end('Method Not Allowed');
+		});
 	});
 
 	httpServer.listen(port, host);
@@ -178,12 +109,11 @@ function start(server) {
 		process.exit(1);
 	});
 
-	const shutdown = async () => {
+	const shutdown = () => {
 		log('Shutting down...');
-		for (const sessionId in transports) {
-			await transports[sessionId].close();
-		}
-		process.exit(0);
+		httpServer.close(() => {
+			process.exit(0);
+		});
 	};
 
 	process.on('SIGTERM', shutdown);
