@@ -285,7 +285,7 @@ function listing(given, body) {
 
 	const lines = [...sizes.keys()]
 		.sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)))
-		.map((rel) => `${human(sizes.get(rel))}\t${under(given, rel)}\n`);
+		.map((rel) => `${human(sizes.get(rel))} ${under(given, rel)}\n`);
 	const tail = hidden > 0 ? `, ${hidden} hidden` : '';
 	return clipped(Buffer.from(lines.join(''))) + counted(sizes.size - 1, 'entry', 'entries') + tail;
 }
