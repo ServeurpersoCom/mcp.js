@@ -69,11 +69,20 @@ function createFactory(bundle) {
 				const message = error instanceof Error ? error.message : String(error);
 				throw new Error(`Tool execution failed: ${message}`);
 			}
-			if (!result || typeof result !== 'object' || !result.type) {
-				throw new Error('Tool returned invalid result. Expected typed object.');
+
+			// A tool returns one typed result or a list of them, one content block each
+			const results = Array.isArray(result) ? result : [result];
+			if (
+				results.length === 0 ||
+				results.some((item) => !item || typeof item !== 'object' || !item.type)
+			) {
+				throw new Error('Tool returned invalid result. Expected typed objects.');
 			}
 
-			return { content: [contentBlock(result)], isError: Boolean(result.isError) };
+			return {
+				content: results.map(contentBlock),
+				isError: results.some((item) => item.isError)
+			};
 		});
 
 		if (prompts.length === 0) {

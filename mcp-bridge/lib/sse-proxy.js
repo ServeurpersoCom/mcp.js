@@ -743,26 +743,23 @@ class ProxySSE {
 				result: toolResult
 			});
 
-			const isImagePreview = this._isDataImage(toolResult);
-			let preview;
-
-			if (isImagePreview) {
-				preview = toolResult.trim();
-			} else {
-				const lines = toolResult.split('\n');
-				preview =
-					lines.length > this.maxLinesForToolResponsePreview
-						? lines.slice(-this.maxLinesForToolResponsePreview).join('\n')
-						: toolResult;
-			}
+			// The text lines of the result show as a code block of their last lines,
+			// each data URL line as an image of its own
+			const { text, images } = this._splitImages(toolResult);
+			const lines = text.split('\n');
+			const preview =
+				lines.length > this.maxLinesForToolResponsePreview
+					? lines.slice(-this.maxLinesForToolResponsePreview).join('\n')
+					: text;
+			const shown =
+				(text ? `\n\`\`\`\n${preview}\n\`\`\`\n` : '') +
+				images.map((image) => `\n![image](${image})\n`).join('');
 
 			const resultChunk = {
 				choices: [
 					{
 						delta: {
-							content: isImagePreview
-								? `\n![image](${preview})\n`
-								: `\n\`\`\`\n${preview}\n\`\`\`\n`
+							content: shown
 						},
 						finish_reason: null
 					}
@@ -775,13 +772,13 @@ class ProxySSE {
 
 		// Inject tool results into context for next turn
 		for (const result of allToolResults) {
-			let content =
-				typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
+			const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
 
-			// Don't inject base64 images into LLM context (too large)
-			if (this._isDataImage(content)) {
-				content = '[Image displayed to user]';
-			}
+			// Base64 images stay out of the LLM context, a marker line stands for each
+			const { text, images } = this._splitImages(raw);
+			const content = [text, ...images.map(() => '[Image displayed to user]')]
+				.filter(Boolean)
+				.join('\n');
 
 			sessionMessages.push({
 				role: 'tool',
@@ -812,6 +809,20 @@ class ProxySSE {
 			this._log(`MCP tool call failed: ${e.message}`);
 			return `Error: ${e.message}`;
 		}
+	}
+
+	/**
+	 * A tool result as its text lines and its data URL image lines
+	 * @param {string} result
+	 * @returns {{text: string, images: string[]}}
+	 */
+	_splitImages(result) {
+		const text = [];
+		const images = [];
+		for (const line of result.split('\n')) {
+			(this._isDataImage(line) ? images : text).push(line);
+		}
+		return { text: text.join('\n'), images };
 	}
 
 	_isDataImage(content) {

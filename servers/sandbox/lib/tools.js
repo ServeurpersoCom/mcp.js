@@ -1,39 +1,26 @@
 /**
  * Sandbox Tools Module
  * Provides isolated code execution in a Podman container
- * Isomorphic to Anthropic's Claude computer-use tools
+ * Isomorphic to Anthropic's Claude computer-use tools, its results worded as
+ * the tools of the KiSS backend word theirs
  *
- * This module implements four core tools for secure code execution:
+ * - bash_tool: the command on stdin, the merged output back with the exit
+ *   code and the duration, a kill at the timeout named
+ * - view: a directory two levels deep with the size of each entry, an image
+ *   with a line saying what it is, a text file with numbered lines
+ * - create_file: a file written whole, empty or not, its directories made
+ * - str_replace: the one place a file holds a string, replaced in place
  *
- * - bash_tool: Execute arbitrary bash commands in isolated container
- *   - Execution timing and exit code reporting, a kill at the timeout named
- *   - Long output kept as its head and its tail, cut on line boundaries
- *
- * - view: Read files or list directories, one container call each
- *   - Directory listing with size information (2 levels deep)
- *   - Filters hidden files and the contents of node_modules
- *   - Images (PNG, JPEG, GIF, WebP) recognized by their magic bytes
- *   - Binary file detection (a NUL byte in the first 64 KiB) and rejection
- *   - Line-numbered file display with an optional checked range
- *
- * - create_file: Create new files with automatic directory creation
- *   - Base64 transport, the bytes written as given
- *   - Automatic parent directory creation
- *
- * - str_replace: Replace unique strings in files with validation
- *   - Enforces string uniqueness (prevents ambiguous replacements)
- *   - Works on the bytes of the file, which come back unchanged around the
- *     replacement whatever their encoding
+ * Every call first passes the law of its schema: no unknown argument, every
+ * required one present, a string where the schema says string and never
+ * shorter than its minLength
  *
  * A path is taken whole as given and one holding a NUL byte is refused. Files
  * travel as base64 in both directions, so no byte goes through a text decoder
+ * and a file in any encoding keeps its bytes
  *
- * All tools execute commands via Podman in an isolated container environment,
- * providing security through containerization while maintaining full filesystem
- * access within the container boundaries.
- *
- * Configuration is managed through the podman-executor module, allowing
- * customization of container name, user, timeouts, and output limits.
+ * Long output keeps its head and its tail, cut on line ends, the bytes hidden
+ * between them counted
  */
 
 const fs = require('fs');
@@ -51,54 +38,78 @@ const TOOLS_DEFINITIONS = rawDefinitions.map((tool) => ({
 	inputSchema: tool.function.parameters
 }));
 
+const SCHEMAS = Object.fromEntries(TOOLS_DEFINITIONS.map((tool) => [tool.name, tool.inputSchema]));
+
 // Bytes a binary file shows a NUL byte in
 const BINARY_PROBE_BYTES = 65536;
 
-// Base64 output of the largest file read, with room for the marker line
+// Base64 output of the largest file read, with room for the marker lines
 const FILE_CAP_BYTES = Math.ceil(config.podman.fileLimitBytes / 3) * 4 + 64;
 
 /**
- * The first of names whose argument is not a non empty string
- * @param {object} args
- * @param {string[]} names
- * @returns {string|undefined}
- */
-function missing(args, names) {
-	return names.find((name) => typeof args[name] !== 'string' || args[name] === '');
-}
-
-/**
- * Refusal of an argument, the name capitalized
- * @param {string} name
- * @returns {object}
- */
-function required(name) {
-	return textResult(`❌ ${name[0].toUpperCase()}${name.slice(1)} argument required`, true);
-}
-
-/**
- * A head and a tail as one text, the bytes hidden between them counted, both
- * cuts on line ends when the kept bytes hold one so no line comes out split
- * @param {{head: Buffer, tail: Buffer, total: number, truncated: boolean}} kept
+ * A count with its noun: 1 line, 3 lines
+ * @param {number} n
+ * @param {string} one
+ * @param {string} many
  * @returns {string}
  */
-function bounded(kept) {
-	if (!kept.truncated) {
-		return Buffer.concat([kept.head, kept.tail]).toString().replace(/\n$/, '');
+function counted(n, one, many) {
+	return `${n} ${n === 1 ? one : many}`;
+}
+
+/**
+ * The first breach of the schema of a tool by its arguments, or null
+ * @param {string} tool
+ * @param {object} args
+ * @returns {string|null}
+ */
+function breach(tool, args) {
+	const { properties, required } = SCHEMAS[tool];
+	const capital = (name) => name[0].toUpperCase() + name.slice(1);
+
+	const unknown = Object.keys(args).filter((key) => !(key in properties));
+	if (unknown.length > 0) {
+		return `Unknown argument ${unknown.join(', ')}`;
 	}
+	for (const name of required) {
+		if (args[name] === undefined) {
+			return `${capital(name)} argument required`;
+		}
+	}
+	for (const [name, value] of Object.entries(args)) {
+		if (properties[name].type !== 'string') {
+			continue;
+		}
+		if (typeof value !== 'string') {
+			return `${capital(name)} argument is not a string`;
+		}
+		if (value.length < (properties[name].minLength || 0)) {
+			return `${capital(name)} argument required`;
+		}
+	}
+	return null;
+}
 
-	const end = kept.head.lastIndexOf(0x0a);
-	const begin = kept.tail.indexOf(0x0a);
-	const first = end < 0 ? kept.head : kept.head.subarray(0, end + 1);
-	const last = begin < 0 ? kept.tail : kept.tail.subarray(begin + 1);
-	const hidden = kept.total - first.length - last.length;
-
-	return (
-		first.toString() +
-		(end < 0 ? '\n' : '') +
-		`⚠️ Long output with ${hidden} bytes hidden from context\n` +
-		last.toString().replace(/\n$/, '')
-	);
+/**
+ * A head and a tail as one text ending on a line end, the bytes hidden
+ * between them counted, both cuts on line ends when the kept bytes hold one
+ * @param {{head: Buffer, tail: Buffer, total: number, truncated: boolean}} kept
+ * @returns {string} Empty, or text ending with a newline
+ */
+function bounded(kept) {
+	let text;
+	if (!kept.truncated) {
+		text = Buffer.concat([kept.head, kept.tail]).toString();
+	} else {
+		const end = kept.head.lastIndexOf(0x0a);
+		const begin = kept.tail.indexOf(0x0a);
+		const first =
+			end < 0 ? Buffer.concat([kept.head, Buffer.from('\n')]) : kept.head.subarray(0, end + 1);
+		const last = begin < 0 ? kept.tail : kept.tail.subarray(begin + 1);
+		const hidden = kept.total - Math.min(kept.head.length, first.length) - last.length;
+		text = `${first}Long output with ${hidden} bytes hidden from context\n${last}`;
+	}
+	return text === '' || text.endsWith('\n') ? text : text + '\n';
 }
 
 /**
@@ -137,7 +148,7 @@ function readScript(quoted) {
 
 /**
  * Split the output of a script on its last line, the marker
- * @param {{head: Buffer, tail: Buffer, truncated: boolean}} result
+ * @param {{head: Buffer, tail: Buffer}} result
  * @returns {{marker: string, body: string}}
  */
 function marked(result) {
@@ -147,36 +158,27 @@ function marked(result) {
 }
 
 /**
- * Read a regular file whole as bytes
- * @param {string} filepath
- * @returns {Promise<{data?: Buffer, error?: string}>}
- */
-async function readFile(filepath) {
-	const result = await podmanExec(readScript(escapeShell(filepath)), FILE_CAP_BYTES);
-	return fileOf(filepath, result);
-}
-
-/**
  * The file a read script printed, or why there is none
  * @param {string} filepath
- * @param {{head: Buffer, tail: Buffer, truncated: boolean, exitCode: number}} result
+ * @param {{head: Buffer, tail: Buffer, total: number, truncated: boolean}} result
+ * @param {string} other What a path that is neither a file nor missing is called
  * @returns {{data?: Buffer, error?: string}}
  */
-function fileOf(filepath, result) {
+function fileOf(filepath, result, other) {
 	const { marker, body } = marked(result);
 	if (marker === 'FILE' && !result.truncated) {
 		return { data: Buffer.from(body, 'base64') };
 	}
 	if (marker.startsWith('BIG ')) {
-		return { error: `File ${filepath} exceeds ${config.podman.fileLimitBytes} bytes` };
+		return { error: `File larger than ${config.podman.fileLimitBytes} bytes` };
 	}
 	if (marker === 'OTHER') {
-		return { error: `Neither a regular file nor a directory: ${filepath}` };
+		return { error: `${other}: ${filepath}` };
 	}
 	if (marker === 'NONE') {
 		return { error: `No such file or directory: ${filepath}` };
 	}
-	return { error: `Cannot read ${filepath}: ${bounded(result)}` };
+	return { error: `Cannot read the file: ${bounded(result).trimEnd()}` };
 }
 
 /**
@@ -202,56 +204,83 @@ function imageType(data) {
 }
 
 /**
+ * Width and height an image header declares, 0 x 0 when it declares none
+ * @param {Buffer} data
+ * @param {string} mime
+ * @returns {{width: number, height: number}}
+ */
+function imageSize(data, mime) {
+	if (mime === 'image/png' && data.length >= 24) {
+		return { width: data.readUInt32BE(16), height: data.readUInt32BE(20) };
+	}
+	if (mime === 'image/gif' && data.length >= 10) {
+		return { width: data.readUInt16LE(6), height: data.readUInt16LE(8) };
+	}
+	if (mime === 'image/webp' && data.length >= 30) {
+		const chunk = data.toString('latin1', 12, 16);
+		if (chunk === 'VP8X') {
+			return { width: data.readUIntLE(24, 3) + 1, height: data.readUIntLE(27, 3) + 1 };
+		}
+		if (chunk === 'VP8L') {
+			const bits = data.readUInt32LE(21);
+			return { width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1 };
+		}
+		if (chunk === 'VP8 ') {
+			return { width: data.readUInt16LE(26) & 0x3fff, height: data.readUInt16LE(28) & 0x3fff };
+		}
+	}
+	if (mime === 'image/jpeg') {
+		// The frame header of a start of frame segment, SOF0 to SOF15 but DHT, JPG and DAC
+		for (let at = 2; at + 9 <= data.length && data[at] === 0xff;) {
+			const marker = data[at + 1];
+			if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) {
+				return { width: data.readUInt16BE(at + 7), height: data.readUInt16BE(at + 5) };
+			}
+			at += 2 + data.readUInt16BE(at + 2);
+		}
+	}
+	return { width: 0, height: 0 };
+}
+
+/**
  * Tool: bash_tool
- * Execute bash command in container with head and tail output bounding
+ * The command on stdin, the merged output back with the exit code
  * @param {object} args Tool arguments
- * @param {string} args.command Bash command to execute
  * @returns {Promise<object>} Tool result
  */
 async function tool_bash(args = {}) {
-	const absent = missing(args, ['command', 'description']);
-	if (absent) {
-		return required(absent);
+	const refused = breach('bash_tool', args);
+	if (refused) {
+		return textResult(refused, true);
 	}
-	const cmd = args.command;
 
 	const t0 = Date.now();
-	const result = await podmanExec(cmd);
+	const result = await podmanExec(args.command);
 	const elapsed = Date.now() - t0;
-
 	const output = bounded(result);
 
 	// timeout exits 124 when it kills the command, the elapsed time tells it
 	// from a command that exits 124 itself
-	const killed = result.exitCode === 124 && elapsed >= config.podman.timeout * 1000;
-	const status = killed
-		? `❌ Killed after ${config.podman.timeout} s`
-		: `${result.exitCode === 0 ? '✅' : '❌'} Exit code ${result.exitCode} (${elapsed} ms)`;
-
-	const newLine = output ? '\n' : '';
-	const justification = `🎯 ${args.description}\n`;
-	return textResult(
-		`${output}${newLine}${justification}#️⃣ ${cmd}\n${status}`,
-		result.exitCode !== 0
-	);
+	if (result.exitCode === 124 && elapsed >= config.podman.timeout * 1000) {
+		return textResult(`${output}Killed after ${config.podman.timeout} s`, true);
+	}
+	return textResult(`${output}Exit code ${result.exitCode} (${elapsed} ms)`, result.exitCode !== 0);
 }
 
 /**
  * Tool: view
- * Display file content or list directory
+ * A directory listing, an image, or a text file with numbered lines
  * @param {object} args Tool arguments
- * @param {string} args.path File or directory path
- * @param {Array<number>} [args.view_range] Optional line range [start, end]
- * @returns {Promise<object>} Tool result
+ * @returns {Promise<object|object[]>} Tool result
  */
 async function tool_view(args = {}) {
-	const absent = missing(args, ['path', 'description']);
-	if (absent) {
-		return required(absent);
+	const refused = breach('view', args);
+	if (refused) {
+		return textResult(refused, true);
 	}
 	const filepath = args.path;
 	if (filepath.includes('\0')) {
-		return textResult('❌ Path holds a NUL byte', true);
+		return textResult('Path holds a NUL byte', true);
 	}
 
 	const range = args.view_range;
@@ -265,174 +294,159 @@ async function tool_view(args = {}) {
 			!Number.isInteger(range[0]) ||
 			!Number.isInteger(range[1])
 		) {
-			return textResult('❌ The view_range is not two line numbers, [start, end]', true);
+			return textResult('The view_range is not two line numbers, [start, end]', true);
 		}
 		first = Math.max(1, range[0]);
 		last = range[1];
 		if (last !== -1 && last < first) {
-			return textResult('❌ The view_range ends before it starts', true);
+			return textResult('The view_range ends before it starts', true);
 		}
 	}
 
-	// One call: a directory listing then DIR, or the read script of a file
+	// One call: a directory listing then its hidden count and DIR, or the read script of a file
 	const quoted = escapeShell(filepath);
 	const script = [
 		`if [ -d ${quoted} ]; then`,
-		`  cd ${quoted} && find . -maxdepth 2 ! -path './.*' ! -path './*/.*' ! -path './node_modules/*' ! -path './*/node_modules/*' -exec du -sh {} \\; 2>/dev/null | sort -k2`,
+		`  cd ${quoted} || exit 1`,
+		"  find . -maxdepth 2 ! -path './.*' ! -path './*/.*' ! -path './node_modules/*' ! -path './*/node_modules/*' -exec du -sh {} \\; 2>/dev/null | sort -k2",
+		"  echo \"HIDDEN $(find . -mindepth 1 -maxdepth 2 -name '.*' ! -path './.*/*' ! -path './node_modules/*' | wc -l)\"",
 		'  echo DIR',
 		'else',
 		readScript(quoted),
 		'fi'
 	].join('\n');
 	const result = await podmanExec(script, FILE_CAP_BYTES);
-	const justification = `🎯 ${args.description}\n`;
 
 	const { marker, body } = marked(result);
 	if (marker === 'DIR') {
+		const lines = body.split('\n');
+		const hidden = Number(lines.pop().replace('HIDDEN ', ''));
 		// find lists from inside the directory, each entry goes back under the given path
-		const listing = body
-			.split('\n')
+		const listing = lines
 			.filter((line) => line !== '')
 			.map((line) => {
 				const tab = line.indexOf('\t');
 				const rel = line.slice(tab + 1);
-				return `${line.slice(0, tab)}\t${rel === '.' ? filepath : path.posix.join(filepath, rel)}`;
-			})
-			.join('\n');
+				return `${line.slice(0, tab)}\t${rel === '.' ? filepath : path.posix.join(filepath, rel)}\n`;
+			});
+		const tail = hidden > 0 ? `, ${hidden} hidden` : '';
 		return textResult(
-			`${clipped(Buffer.from(listing))}\n${justification}👁️ Directory listing of ${filepath}`
+			clipped(Buffer.from(listing.join(''))) +
+				counted(Math.max(0, listing.length - 1), 'entry', 'entries') +
+				tail
 		);
 	}
 
-	const file = fileOf(filepath, result);
+	const file = fileOf(filepath, result, 'Neither a regular file nor a directory');
 	if (file.error) {
-		return textResult(`❌ ${file.error}`, true);
+		return textResult(file.error, true);
 	}
 
-	const mimeType = imageType(file.data);
-	if (mimeType) {
-		return imageResult(file.data.toString('base64'), mimeType);
+	const mime = imageType(file.data);
+	if (mime) {
+		const { width, height } = imageSize(file.data, mime);
+		return [
+			textResult(`Image ${mime} ${width}x${height}, ${file.data.length} bytes`),
+			imageResult(file.data.toString('base64'), mime)
+		];
 	}
 
 	if (file.data.subarray(0, BINARY_PROBE_BYTES).includes(0)) {
-		return textResult(`❌ Binary file ${filepath}`, true);
+		return textResult('Binary file', true);
 	}
 
 	const text = file.data.toString();
 	const lines = text === '' ? [] : text.replace(/\n$/, '').split('\n');
-	const totalLines = lines.length;
-
-	if (ranged && first > totalLines) {
-		return textResult(`❌ Line ${first} is past the end, the file has ${totalLines} lines`, true);
-	}
-	const endLine = last === -1 || last > totalLines ? totalLines : last;
-
-	const numbered = lines
-		.slice(first - 1, endLine)
-		.map((line, idx) => `${first + idx}\t${line}`)
-		.join('\n');
-	const numberedLines = clipped(Buffer.from(numbered));
-
-	if (ranged) {
+	const total = lines.length;
+	if (ranged && first > total) {
 		return textResult(
-			`${numberedLines}\n${justification}👁️ File content of ${filepath} (lines ${first}-${endLine} out of ${totalLines})`
+			`Line ${first} is past the end, the file has ${counted(total, 'line', 'lines')}`,
+			true
 		);
 	}
-
-	return textResult(
-		`${numberedLines}\n${justification}👁️ File content of ${filepath} (${totalLines} lines)`
-	);
+	const end = last === -1 || last > total ? total : last;
+	const numbered = lines
+		.slice(first - 1, end)
+		.map((line, idx) => `${first + idx}\t${line}\n`)
+		.join('');
+	const summary = ranged ? `Lines ${first}-${end} of ${total}` : counted(total, 'line', 'lines');
+	return textResult(clipped(Buffer.from(numbered)) + summary);
 }
 
 /**
  * Tool: create_file
- * Create new file with automatic directory creation and base64 safety
+ * A file written whole with the text given, its parent directories made, a
+ * file already there written over
  * @param {object} args Tool arguments
- * @param {string} args.path File path
- * @param {string} args.file_text File contents, empty or not
  * @returns {Promise<object>} Tool result
  */
 async function tool_create_file(args = {}) {
-	const absent = missing(args, ['path', 'description']);
-	if (absent) {
-		return required(absent);
-	}
-	if (typeof args.file_text !== 'string') {
-		return required('file_text');
+	const refused = breach('create_file', args);
+	if (refused) {
+		return textResult(refused, true);
 	}
 	const filepath = args.path;
 	if (filepath.includes('\0')) {
-		return textResult('❌ Path holds a NUL byte', true);
+		return textResult('Path holds a NUL byte', true);
 	}
 
-	const b64 = Buffer.from(args.file_text).toString('base64');
+	const text = args.file_text;
 	const quoted = escapeShell(filepath);
-	const script = `mkdir -p -- "$(dirname -- ${quoted})" && echo '${b64}' | base64 -d > ${quoted}`;
+	const script = [
+		`if [ -e ${quoted} ]; then echo THERE; fi`,
+		`mkdir -p -- "$(dirname -- ${quoted})" && echo '${Buffer.from(text).toString('base64')}' | base64 -d > ${quoted}`
+	].join('\n');
 	const result = await podmanExec(script);
-
+	const output = bounded(result);
 	if (result.exitCode !== 0) {
-		return textResult(`${bounded(result)}\n❌ Error creating file ${filepath}`, true);
+		return textResult(`Cannot write the file: ${output.replace(/^THERE\n/, '').trimEnd()}`, true);
 	}
 
-	const size = Buffer.byteLength(args.file_text);
-	const justification = `🎯 ${args.description}\n`;
-	return textResult(`${justification}✨ File ${filepath} created (${size} bytes)`);
+	const lines = text.split('\n').length - 1 + (text !== '' && !text.endsWith('\n') ? 1 : 0);
+	const verb = output.startsWith('THERE') ? 'Overwrote' : 'Created';
+	return textResult(
+		`${verb} ${filepath}, ${counted(lines, 'line', 'lines')}, ${counted(Buffer.byteLength(text), 'byte', 'bytes')}`
+	);
 }
-
-const STR_REPLACE_KEYS = ['description', 'path', 'old_str', 'new_str'];
 
 /**
  * Tool: str_replace
- * Replace unique string in file with validation and base64-safe write
+ * The one place a text file holds a string, replaced by another, the file
+ * written in place, its other bytes untouched
  * @param {object} args Tool arguments
- * @param {string} args.path File path
- * @param {string} args.old_str String to replace, not empty
- * @param {string} args.new_str Replacement string, empty to delete
  * @returns {Promise<object>} Tool result
  */
 async function tool_str_replace(args = {}) {
-	// An unknown key carries the replacement when its name is wrong
-	const unknown = Object.keys(args).filter((key) => !STR_REPLACE_KEYS.includes(key));
-	if (unknown.length > 0) {
-		return textResult(
-			`❌ Unknown argument ${unknown.join(', ')}, the replacement goes in new_str`,
-			true
-		);
-	}
-
-	const absent = missing(args, ['path', 'old_str', 'description']);
-	if (absent) {
-		return required(absent);
-	}
-	if (typeof args.new_str !== 'string') {
-		return required('new_str');
+	const refused = breach('str_replace', args);
+	if (refused) {
+		return textResult(refused, true);
 	}
 	const filepath = args.path;
 	if (filepath.includes('\0')) {
-		return textResult('❌ Path holds a NUL byte', true);
+		return textResult('Path holds a NUL byte', true);
 	}
 
-	const file = await readFile(filepath);
+	const read = await podmanExec(readScript(escapeShell(filepath)), FILE_CAP_BYTES);
+	const file = fileOf(filepath, read, 'Not a regular file');
 	if (file.error) {
-		return textResult(`❌ ${file.error}`, true);
+		return textResult(file.error, true);
 	}
 	const content = file.data;
 	if (content.subarray(0, BINARY_PROBE_BYTES).includes(0)) {
-		return textResult(`❌ Binary file ${filepath}`, true);
+		return textResult('Binary file', true);
 	}
 
 	const oldBytes = Buffer.from(args.old_str);
 	const at = content.indexOf(oldBytes);
 	if (at < 0) {
-		return textResult(`❌ String not found in ${filepath}`, true);
+		return textResult(`Not found in ${filepath}`, true);
 	}
-
 	let count = 0;
 	for (let i = at; i >= 0; i = content.indexOf(oldBytes, i + oldBytes.length)) {
 		count++;
 	}
 	if (count > 1) {
-		return textResult(`❌ String found ${count} times in ${filepath} (must be unique)`, true);
+		return textResult(`Found ${count} times in ${filepath}, old_str must be unique`, true);
 	}
 
 	let line = 1;
@@ -441,21 +455,20 @@ async function tool_str_replace(args = {}) {
 	}
 
 	const newBytes = Buffer.from(args.new_str);
-	const newContent = Buffer.concat([
+	const written = Buffer.concat([
 		content.subarray(0, at),
 		newBytes,
 		content.subarray(at + oldBytes.length)
 	]);
-	const writeScript = `echo '${newContent.toString('base64')}' | base64 -d > ${escapeShell(filepath)}`;
-	const writeResult = await podmanExec(writeScript);
-
-	if (writeResult.exitCode !== 0) {
-		return textResult(`${bounded(writeResult)}\n❌ Error writing file ${filepath}`, true);
+	const write = await podmanExec(
+		`echo '${written.toString('base64')}' | base64 -d > ${escapeShell(filepath)}`
+	);
+	if (write.exitCode !== 0) {
+		return textResult(`Cannot write the file: ${bounded(write).trimEnd()}`, true);
 	}
 
-	const justification = `🎯 ${args.description}\n`;
 	return textResult(
-		`${justification}🔄 Replacement done at line ${line} of ${filepath} (${oldBytes.length} -> ${newBytes.length} bytes)`
+		`Replaced at line ${line} of ${filepath}, ${oldBytes.length} -> ${newBytes.length} bytes`
 	);
 }
 
