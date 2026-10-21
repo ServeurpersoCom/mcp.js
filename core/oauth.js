@@ -13,7 +13,7 @@
  * restart keeps connectors authorized, and removing a file revokes it
  * Pure helpers stay at module scope, everything reading the configuration or
  * holding issued credentials lives in the factory closure
- * (MCP spec 2025-06-18, OAuth 2.1, RFC 7591 / 7636 / 9728)
+ * (MCP authorization, OAuth 2.1, RFC 7591 / 7636 / 9728)
  */
 
 const crypto = require('crypto');

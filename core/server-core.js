@@ -1,146 +1,111 @@
 /**
- * MCP Server core using @modelcontextprotocol/sdk
+ * MCP server core
+ * Builds the low level Server of the v2 SDK over the aggregated tools and
+ * prompts. Every transport serves instances from one factory: a fresh one per
+ * HTTP request, one per stdio connection, so no state outlives its exchange
  */
 
-const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
-const {
-	ListToolsRequestSchema,
-	CallToolRequestSchema,
-	ListPromptsRequestSchema,
-	GetPromptRequestSchema
-} = require('@modelcontextprotocol/sdk/types.js');
+const { Server } = require('@modelcontextprotocol/server');
 
-class MCPServer {
-	constructor(config, toolsModule, promptsModule = null) {
-		this.config = config;
-		this.toolsDefinitions = toolsModule.TOOLS_DEFINITIONS;
-		this.toolsMapping = toolsModule.TOOLS_MAPPING;
-		this.promptsDefinitions = promptsModule?.PROMPTS_DEFINITIONS || [];
-		this.promptsMapping = promptsModule?.PROMPTS_MAPPING || {};
-
-		// Build capabilities based on available features
-		const capabilities = {
-			tools: {}
+/**
+ * Content block of a typed tool result
+ * @param {{type: string, text?: string, data?: string, mimeType?: string}} result
+ * @returns {object}
+ */
+function contentBlock(result) {
+	if (result.type === 'text') {
+		return {
+			type: 'text',
+			text: typeof result.text === 'string' ? result.text : JSON.stringify(result.text ?? '')
 		};
-		if (this.promptsDefinitions.length > 0) {
-			capabilities.prompts = { listChanged: true };
-		}
+	}
 
-		// Create SDK Server instance, optional icons ride verbatim into the initialize serverInfo
-		this.server = new Server(
-			{
-				name: config.mcp.serverName,
-				version: config.mcp.serverVersion,
-				...(config.mcp.serverIcons && { icons: config.mcp.serverIcons })
-			},
-			{ capabilities }
-		);
+	if (result.type === 'image') {
+		return {
+			type: 'image',
+			data: typeof result.data === 'string' ? result.data : '',
+			mimeType: result.mimeType || 'application/octet-stream'
+		};
+	}
 
-		// Register tool list handler
-		this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
-			tools: this.toolsDefinitions
-		}));
+	throw new Error(`Unsupported tool result type: ${result.type}`);
+}
 
-		// Register tool call handler
-		this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+/**
+ * Factory of servers for one bundle, the identity of the aggregate riding
+ * into initialize on 2025 connections and into result _meta on 2026 ones
+ * @param {object} bundle Bundle returned by the registry
+ * @returns {function(): Server}
+ */
+function createFactory(bundle) {
+	const { config, toolsModule, promptsModule } = bundle;
+	const tools = toolsModule.TOOLS_DEFINITIONS;
+	const handlers = toolsModule.TOOLS_MAPPING;
+	const prompts = promptsModule.PROMPTS_DEFINITIONS;
+	const templates = promptsModule.PROMPTS_MAPPING;
+
+	const info = {
+		name: config.mcp.serverName,
+		version: config.mcp.serverVersion,
+		...(config.mcp.serverIcons && { icons: config.mcp.serverIcons })
+	};
+	const capabilities = prompts.length > 0 ? { tools: {}, prompts: {} } : { tools: {} };
+
+	return () => {
+		const server = new Server(info, { capabilities });
+
+		server.setRequestHandler('tools/list', async () => ({ tools }));
+
+		server.setRequestHandler('tools/call', async (request) => {
 			const { name, arguments: args } = request.params;
-
-			if (!this.toolsMapping[name]) {
+			if (!handlers[name]) {
 				throw new Error(`Unknown tool: ${name}`);
 			}
 
+			let result;
 			try {
-				const result = await this.toolsMapping[name](args ?? {});
-
-				if (!result || typeof result !== 'object' || !result.type) {
-					throw new Error('Tool returned invalid result. Expected typed object.');
-				}
-
-				const contentBlock = this._createContentBlock(result);
-				return {
-					content: [contentBlock],
-					isError: Boolean(result.isError)
-				};
+				result = await handlers[name](args ?? {});
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				throw new Error(`Tool execution failed: ${message}`);
 			}
+			if (!result || typeof result !== 'object' || !result.type) {
+				throw new Error('Tool returned invalid result. Expected typed object.');
+			}
+
+			return { content: [contentBlock(result)], isError: Boolean(result.isError) };
 		});
 
-		// Register prompt handlers only when prompts are available
-		if (this.promptsDefinitions.length > 0) {
-			this.server.setRequestHandler(ListPromptsRequestSchema, async (request) => {
-				return {
-					prompts: this.promptsDefinitions
-				};
-			});
+		if (prompts.length === 0) {
+			return server;
+		}
 
-			this.server.setRequestHandler(GetPromptRequestSchema, async (request) => {
-				const { name, arguments: promptArgs } = request.params;
+		server.setRequestHandler('prompts/list', async () => ({ prompts }));
 
-				if (!this.promptsMapping[name]) {
-					throw new Error(`Unknown prompt: ${name}`);
-				}
+		server.setRequestHandler('prompts/get', async (request) => {
+			const { name, arguments: values } = request.params;
+			const prompt = templates[name];
+			if (!prompt) {
+				throw new Error(`Unknown prompt: ${name}`);
+			}
 
-				const prompt = this.promptsMapping[name];
-
-				const messages = prompt.messages.map((msg) => {
-					if (msg.content?.type === 'text' && promptArgs) {
-						let text = msg.content.text;
-						for (const [key, value] of Object.entries(promptArgs)) {
-							text = text.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), value);
-						}
-						return {
-							role: msg.role,
-							content: { type: 'text', text }
-						};
-					}
+			// {{key}} placeholders of a text message take the value of the argument key
+			const messages = prompt.messages.map((msg) => {
+				if (msg.content?.type !== 'text' || !values) {
 					return msg;
-				});
-
-				return {
-					description: prompt.description,
-					messages
-				};
+				}
+				let text = msg.content.text;
+				for (const [key, value] of Object.entries(values)) {
+					text = text.split(`{{${key}}}`).join(value);
+				}
+				return { role: msg.role, content: { type: 'text', text } };
 			});
-		}
-	}
 
-	_createContentBlock(result) {
-		if (result.type === 'text') {
-			return {
-				type: 'text',
-				text: typeof result.text === 'string' ? result.text : JSON.stringify(result.text ?? '')
-			};
-		}
+			return { description: prompt.description, messages };
+		});
 
-		if (result.type === 'image') {
-			return {
-				type: 'image',
-				data: typeof result.data === 'string' ? result.data : '',
-				mimeType: result.mimeType || 'application/octet-stream'
-			};
-		}
-
-		throw new Error(`Unsupported tool result type: ${result.type}`);
-	}
-
-	/**
-	 * Get SDK Server instance for transport connection
-	 */
-	getServer() {
-		return this.server;
-	}
-
-	setupSignalHandlers() {
-		const shutdown = () => {
-			console.error(`[${this.config.mcp.serverName}] Shutting down...`);
-			this.server.close();
-			process.exit(0);
-		};
-		process.on('SIGTERM', shutdown);
-		process.on('SIGINT', shutdown);
-	}
+		return server;
+	};
 }
 
-module.exports = MCPServer;
+module.exports = { createFactory };

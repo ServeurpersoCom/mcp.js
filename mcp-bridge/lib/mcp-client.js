@@ -1,15 +1,11 @@
 /**
- * MCP Client wrapper using @modelcontextprotocol/sdk
- * Manages multiple MCP servers with SDK transports
+ * MCP Client wrapper using the v2 client SDK
+ * Manages multiple MCP servers over stdio or Streamable HTTP, each connection
+ * negotiating its era: 2026-07-28 when the server speaks it, else 2025
  */
 
-const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
-const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js');
-const {
-	StreamableHTTPClientTransport
-} = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
-const { SSEClientTransport } = require('@modelcontextprotocol/sdk/client/sse.js');
-const { WebSocketClientTransport } = require('@modelcontextprotocol/sdk/client/websocket.js');
+const { Client, StreamableHTTPClientTransport } = require('@modelcontextprotocol/client');
+const { StdioClientTransport } = require('@modelcontextprotocol/client/stdio');
 const path = require('path');
 
 // Stdio children inherit this working directory, so the command and args in
@@ -41,11 +37,7 @@ class MCPClient {
 					name: 'llama-mcp-bridge',
 					version: '1.0.0'
 				},
-				{
-					capabilities: {
-						tools: {}
-					}
-				}
+				{ versionNegotiation: { mode: 'auto' } }
 			);
 
 			await client.connect(transport);
@@ -192,59 +184,27 @@ class MCPClient {
 
 	// Private methods
 
-	_detectTransportType(serverConfig) {
-		if (serverConfig?.command) {
-			return 'stdio';
-		}
-
-		const normalizedUrl = (serverConfig?.url || '').trim().toLowerCase();
-		if (normalizedUrl.startsWith('ws://') || normalizedUrl.startsWith('wss://')) {
-			return 'websocket';
-		}
-
-		return 'http';
-	}
-
+	// A server with a command runs as a stdio child, one with a url is reached
+	// over Streamable HTTP, its headers sent with every request
 	_createTransport(serverName, serverConfig) {
-		const transportType = this._detectTransportType(serverConfig);
-
-		switch (transportType) {
-			case 'stdio':
-				return new StdioClientTransport({
-					command: serverConfig.command,
-					args: serverConfig.args || [],
-					env: serverConfig.env,
-					cwd: ROOT_DIR
-				});
-
-			case 'websocket':
-			case 'ws':
-				return new WebSocketClientTransport(new URL(serverConfig.url));
-
-			case 'http':
-			case 'streamable-http':
-				// Try StreamableHTTP first, fallback to SSE
-				const url = new URL(serverConfig.url);
-				const requestInit = {};
-
-				if (serverConfig.headers) {
-					requestInit.headers = serverConfig.headers;
-				}
-
-				try {
-					console.log(`[MCP] Creating StreamableHTTP transport for ${serverName} (${url.href})`);
-					return new StreamableHTTPClientTransport(url, {
-						requestInit,
-						sessionId: serverConfig.sessionId
-					});
-				} catch (httpError) {
-					console.warn(`[MCP] StreamableHTTP failed for ${serverName}, trying SSE...`, httpError);
-					return new SSEClientTransport(url, { requestInit });
-				}
-
-			default:
-				throw new Error(`Unsupported transport "${transportType}" for server "${serverName}"`);
+		if (serverConfig.command) {
+			return new StdioClientTransport({
+				command: serverConfig.command,
+				args: serverConfig.args || [],
+				env: serverConfig.env,
+				cwd: ROOT_DIR
+			});
 		}
+
+		if (serverConfig.url) {
+			const url = new URL(serverConfig.url);
+			console.log(`[MCP] Creating Streamable HTTP transport for ${serverName} (${url.href})`);
+			return new StreamableHTTPClientTransport(url, {
+				requestInit: serverConfig.headers ? { headers: serverConfig.headers } : {}
+			});
+		}
+
+		throw new Error(`Server "${serverName}" needs a command or a url`);
 	}
 }
 

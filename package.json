@@ -12,10 +12,11 @@
 		"format:check": "prettier --check \"**/*.{js,json,md}\""
 	},
 	"dependencies": {
-		"@modelcontextprotocol/sdk": "^1.32.1",
+		"@modelcontextprotocol/client": "^2.3.1",
+		"@modelcontextprotocol/node": "^2.1.1",
+		"@modelcontextprotocol/server": "^2.3.1",
 		"imapflow": "^2.5.9",
-		"mailparser": "^3.10.0",
-		"ws": "^8.22.0"
+		"mailparser": "^3.10.0"
 	},
 	"devDependencies": {
 		"prettier": "^3.9.10"

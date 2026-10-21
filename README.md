@@ -3,18 +3,18 @@
 The Model Context Protocol server I run every day, published as it is. It
 serves a Podman sandbox, a persistent memory, an agent account on Moltbook
 and a read only mailbox to any MCP client, behind one endpoint. Built on the
-official TypeScript SDK
-([@modelcontextprotocol/sdk](https://github.com/modelcontextprotocol/typescript-sdk),
-v1.29+), with a custom WebSocket server transport added on top since the SDK
-only ships stdio and Streamable HTTP on the server side.
+official TypeScript SDK v2
+([@modelcontextprotocol/server](https://github.com/modelcontextprotocol/typescript-sdk)),
+it speaks the 2026-07-28 revision of the protocol and the 2025 ones on the
+same endpoint, each client getting the newest revision it knows.
 
 - llama.cpp Svelte WebUI (native MCP client)
 - OpenAI ChatGPT (web, custom MCP server)
 - Anthropic Claude (web, custom MCP server)
 - any OpenAI compatible chat UI without an MCP client, through the bridge
 
-Four servers, three transports (stdio, Streamable HTTP, WebSocket), every
-server aggregated behind one endpoint, zero framework.
+Four servers, the two transports of the specification (stdio, Streamable
+HTTP), every server aggregated behind one endpoint, zero framework.
 
 ## Warning
 
@@ -23,8 +23,8 @@ Everything the container can reach, the LLM reaches: its volumes, its
 network, its GPU. Keep the container rootless under a dedicated user, mount
 only what the LLM should touch, and treat what it writes as untrusted.
 
-Never expose the HTTP or WebSocket transport on a port reachable from the
-public internet without all three of:
+Never expose the HTTP transport on a port reachable from the public internet
+without all three of:
 
 - `auth.mode` set to something other than `none` in `config.json`
 - HTTPS in front (reverse proxy)
@@ -35,7 +35,7 @@ server, your mailbox to read.
 
 ## Install
 
-Requires Node.js 18+, and Podman for the sandbox.
+Requires Node.js 20+, and Podman for the sandbox.
 
 ```bash
 git clone https://github.com/ServeurpersoCom/mcp.js
@@ -48,7 +48,7 @@ npm install
 ```
 config.json        transport, credentials, and the identity served
 core/              protocol, auth, and the three transports
-core/transports/   stdio, Streamable HTTP, WebSocket
+core/transports/   stdio, Streamable HTTP
 servers/sandbox/   bash_tool, view, create_file, str_replace in a Podman container
 servers/memory/    a persistent memory in plain files
 servers/moltbook/  an agent account on Moltbook
@@ -71,12 +71,16 @@ startup fails saying which name and which two servers. A tool declared in a
 ```bash
 node main.js stdio              # local MCP clients
 node main.js streamable-http    # HTTP, port 8083
-node main.js websocket          # WebSocket, port 8084
 ```
 
 `main.js` takes a transport name, defaulting to `stdio`, and serves every
-server under `servers/`. The transports bind `127.0.0.1`: put a reverse
-proxy in front to reach them from elsewhere.
+server under `servers/`. The HTTP transport binds `127.0.0.1`: put a reverse
+proxy in front to reach it from elsewhere.
+
+Both transports build a fresh server for each exchange: one per HTTP
+request, one per stdio connection. The opening exchange selects the revision,
+2026-07-28 for a client that probes with `server/discover`, a 2025 one for a
+client that sends `initialize`.
 
 ## Config
 
@@ -103,9 +107,7 @@ Root:
 		"storeDir": "data/oauth"
 	},
 	"streamable_http": { "host": "127.0.0.1", "port": 8083 },
-	"websocket": { "host": "127.0.0.1", "port": 8084 },
 	"mcp": {
-		"protocolVersion": "2025-06-18",
 		"serverName": "mcp-sandbox",
 		"serverVersion": "1.0.0",
 		"serverIcons": [
@@ -127,12 +129,13 @@ Root:
 One endpoint serves them all, so ports and identity belong to the root and a
 server never carries them. `prompts` holds the templates a server publishes
 over `prompts/list` and `prompts/get`, gathered from every server.
-`serverIcons` is optional and rides verbatim into the `initialize` response.
+`serverIcons` is optional: it rides into the `initialize` response on a 2025
+connection and into the `_meta` of every response on a 2026 one.
 
 ### Auth
 
-`auth.mode` selects the scheme for the HTTP and WebSocket transports. Stdio
-is never authenticated, it speaks over local pipes only.
+`auth.mode` selects the scheme for the HTTP transport. Stdio is never
+authenticated, it speaks over local pipes only.
 
 | Mode           | What is accepted                               |
 | -------------- | ---------------------------------------------- |
@@ -142,9 +145,7 @@ is never authenticated, it speaks over local pipes only.
 | `oauth+static` | Either of the two                              |
 
 `static` suits clients that cannot run an interactive flow. Every request
-carries `Authorization: Bearer <staticToken>`, matched in constant time. The
-WebSocket transport only ever understands this scheme, so it rejects every
-connection under `oauth`.
+carries `Authorization: Bearer <staticToken>`, matched in constant time.
 
 `oauth` implements the smallest surface an MCP connector needs: dynamic
 client registration, a consent form gated by `password`, and token exchange
@@ -236,8 +237,9 @@ certificate a public authority signed.
 
 `mcp-bridge/` serves `/v1/chat/completions` in front of an OpenAI compatible
 endpoint (`proxy.apiUrl`, llama-server for me) and runs the tool calls of the
-model itself, through the servers of this repository over stdio, until the
-model answers. A chat UI without an MCP client gets the tools that way, each
+model itself, through the servers of this repository over stdio (or any MCP
+server over Streamable HTTP, given its `url` and `headers`), until the model
+answers. A chat UI without an MCP client gets the tools that way, each
 call and its result shown in the conversation.
 
 ```bash

@@ -1,8 +1,8 @@
 /**
- * Bearer token authentication shared across HTTP and WebSocket transports
+ * Bearer token authentication of the proxy endpoint
  * Verifies the Authorization: Bearer <token> header against a static secret
  * loaded from config.json, using a constant time comparison
- * (MCP spec 2025-06-18, OAuth 2.0 Bearer scheme)
+ * (OAuth 2.0 Bearer scheme)
  */
 
 const crypto = require('crypto');

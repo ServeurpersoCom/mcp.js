@@ -247,7 +247,7 @@ class ProxySSE {
 			return res.end();
 		}
 
-		// Bearer token check (MCP spec 2025-06-18, OAuth 2.0)
+		// Bearer token check (OAuth 2.0 Bearer scheme)
 		// Runs after CORS preflight so browsers can still negotiate
 		if (AUTH_ENABLED && !verifyAuthHeader(req.headers.authorization)) {
 			res.writeHead(401, {

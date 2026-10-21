@@ -11,12 +11,7 @@
 		"host": "127.0.0.1",
 		"port": 8083
 	},
-	"websocket": {
-		"host": "127.0.0.1",
-		"port": 8084
-	},
 	"mcp": {
-		"protocolVersion": "2025-06-18",
 		"serverName": "mcp-sandbox",
 		"serverVersion": "1.0.0",
 		"serverIcons": [

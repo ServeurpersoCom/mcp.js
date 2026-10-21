@@ -1,17 +1,16 @@
 /**
  * Streamable HTTP transport
- * One server instance and one transport per POST, so a JSON-RPC id maps to the
- * stream of its own request and to nothing else, guarded by the OAuth module
- * built from the server configuration
- * The endpoint carries no session: an Mcp-Session-Id sent by a client is
- * ignored, GET and DELETE answer 405, and a restart stays invisible to clients
+ * One server instance per POST, built by the v2 handler that serves the
+ * 2026-07-28 revision and the 2025 ones on the same endpoint, guarded by the
+ * OAuth module built from the server configuration
+ * The endpoint carries no session: GET and DELETE answer 405, and a restart
+ * stays invisible to clients
  */
 
 const http = require('http');
-const {
-	StreamableHTTPServerTransport
-} = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
-const MCPServer = require('../server-core');
+const { createMcpHandler } = require('@modelcontextprotocol/server');
+const { toNodeHandler } = require('@modelcontextprotocol/node');
+const { createFactory } = require('../server-core');
 const { createOAuth } = require('../oauth');
 
 const sendJsonError = (res, status, code, message, headers = {}) => {
@@ -27,12 +26,17 @@ const describe = (message) => {
 
 /**
  * Start the server on Streamable HTTP
- * @param {object} server - Bundle returned by the registry
+ * @param {object} server Bundle returned by the registry
  */
 function start(server) {
 	const { config, toolsModule, promptsModule, log } = server;
 	const oauth = createOAuth(config);
 	const { host, port } = config.streamable_http;
+	const handle = toNodeHandler(
+		createMcpHandler(createFactory(server), {
+			onerror: (error) => log(`Request failed: ${error.message}`)
+		})
+	);
 
 	log('Starting Streamable HTTP transport');
 	log(`Listening on http://${host}:${port}`);
@@ -44,7 +48,7 @@ function start(server) {
 		res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
 		res.setHeader(
 			'Access-Control-Allow-Headers',
-			'Content-Type, Authorization, Mcp-Session-Id, MCP-Protocol-Version, Accept'
+			'Content-Type, Authorization, Accept, MCP-Protocol-Version, Mcp-Method, Mcp-Name'
 		);
 
 		if (req.method === 'OPTIONS') {
@@ -80,19 +84,8 @@ function start(server) {
 
 			log(`${describe(parsedBody)} from ${req.socket.remoteAddress}`);
 
-			const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-			const mcpServer = new MCPServer(config, toolsModule, promptsModule);
-			const instance = mcpServer.getServer();
-
-			// Closing the server closes the transport it carries, so the pair dies
-			// with the response whether it completed or the client went away
-			res.on('close', () => {
-				instance.close();
-			});
-
 			try {
-				await instance.connect(transport);
-				await transport.handleRequest(req, res, parsedBody);
+				await handle(req, res, parsedBody);
 			} catch (error) {
 				log(`Request failed: ${error.message}`);
 				if (!res.headersSent) {

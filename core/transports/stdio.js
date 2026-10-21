@@ -1,27 +1,25 @@
 /**
  * Stdio transport
- * One server instance bound to the process standard streams, the transport a
- * parent process spawns when it embeds a server as a child
+ * The process standard streams, the transport a parent process spawns when it
+ * embeds a server as a child. The opening exchange selects the era of the
+ * connection, 2026-07-28 or a 2025 revision, and pins one server to it
  */
 
-const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
-const MCPServer = require('../server-core');
+const { serveStdio } = require('@modelcontextprotocol/server/stdio');
+const { createFactory } = require('../server-core');
 
 /**
  * Start the server on stdio
- * @param {object} server - Bundle returned by the registry
+ * @param {object} server Bundle returned by the registry
  */
 function start(server) {
-	const { config, toolsModule, promptsModule, log } = server;
-
-	const mcpServer = new MCPServer(config, toolsModule, promptsModule);
-	mcpServer.setupSignalHandlers();
+	const { toolsModule, promptsModule, log } = server;
 
 	log('Starting stdio transport');
-	log(`Tools available: ${mcpServer.toolsDefinitions.length}`);
-	log(`Prompts available: ${mcpServer.promptsDefinitions.length}`);
+	log(`Tools available: ${toolsModule.TOOLS_DEFINITIONS.length}`);
+	log(`Prompts available: ${promptsModule.PROMPTS_DEFINITIONS.length}`);
 
-	mcpServer.getServer().connect(new StdioServerTransport());
+	serveStdio(createFactory(server));
 }
 
 module.exports = { start };

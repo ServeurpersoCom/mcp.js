@@ -7,7 +7,7 @@
 
 const { loadServers } = require('./core/registry');
 
-const TRANSPORTS = ['stdio', 'streamable-http', 'websocket'];
+const TRANSPORTS = ['stdio', 'streamable-http'];
 const DEFAULT_TRANSPORT = 'stdio';
 
 const [transportName = DEFAULT_TRANSPORT] = process.argv.slice(2);
