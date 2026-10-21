@@ -8,68 +8,68 @@ spec:
   restartPolicy: Always
 
   containers:
-  - name: tools
-    image: localhost/sandbox-image:clean
+    - name: tools
+      image: localhost/sandbox-image:clean
 
-    resources:
-      limits:
-        nvidia.com/gpu=all: 1
-        #memory: 4Gi
-        #cpu: "2"
+      resources:
+        limits:
+          nvidia.com/gpu=all: 1
+          #memory: 4Gi
+          #cpu: "2"
 
-    command: ["sleep", "infinity"]
+      command: ['sleep', 'infinity']
 
-  - name: container
-    image: localhost/sandbox-image:clean
+    - name: container
+      image: localhost/sandbox-image:clean
 
-    ports:
-    - containerPort: 22
-      hostPort: 2222
-    - containerPort: 7777
-      hostPort: 7777
+      ports:
+        - containerPort: 22
+          hostPort: 2222
+        - containerPort: 7777
+          hostPort: 7777
 
-    resources:
-      limits:
-        nvidia.com/gpu=all: 1
-        #memory: 4Gi
-        #cpu: "2"
+      resources:
+        limits:
+          nvidia.com/gpu=all: 1
+          #memory: 4Gi
+          #cpu: "2"
 
-    securityContext:
-      capabilities:
-        add: ["NET_ADMIN"]
+      securityContext:
+        capabilities:
+          add: ['NET_ADMIN']
 
-    volumeMounts:
-    - name: inputs
-      mountPath: /mnt/inputs
-      readOnly: true
-    - name: workspace
-      mountPath: /mnt/workspace
-    - name: outputs
-      mountPath: /mnt/outputs
-    - name: tun
-      mountPath: /dev/net/tun
+      volumeMounts:
+        - name: inputs
+          mountPath: /mnt/inputs
+          readOnly: true
+        - name: workspace
+          mountPath: /mnt/workspace
+        - name: outputs
+          mountPath: /mnt/outputs
+        - name: tun
+          mountPath: /dev/net/tun
 
-    command:
-    - /bin/bash
-    - -c
-    - |
-      find /mnt/outputs -mindepth 1 -delete 2>/dev/null || true
-      exec /usr/sbin/sshd -D
+      command:
+        - /bin/bash
+        - -c
+        - |
+          find /mnt/outputs -mindepth 1 -delete 2>/dev/null || true
+          exec /usr/sbin/sshd -D
 
   volumes:
-  - name: inputs
-    hostPath:
-      path: /var/www/ia/models
-      type: Directory
-  - name: workspace
-    hostPath:
-      path: /var/www/ia/ssd/workspace
-      type: Directory
-  - name: outputs
-    hostPath:
-      path: /var/www/ia/ssd/outputs
-      type: Directory
-  - name: tun
-    hostPath:
-      path: /dev/net/tun
-      type: CharDevice
+    - name: inputs
+      hostPath:
+        path: /var/www/ia/models
+        type: Directory
+    - name: workspace
+      hostPath:
+        path: /var/www/ia/ssd/workspace
+        type: Directory
+    - name: outputs
+      hostPath:
+        path: /var/www/ia/ssd/outputs
+        type: Directory
+    - name: tun
+      hostPath:
+        path: /dev/net/tun
+        type: CharDevice

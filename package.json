@@ -8,8 +8,8 @@
 	"author": "",
 	"keywords": [],
 	"scripts": {
-		"format": "prettier --write \"**/*.{js,json,md}\"",
-		"format:check": "prettier --check \"**/*.{js,json,md}\""
+		"format": "prettier --write \"**/*.{js,json,md,yaml,yml}\"",
+		"format:check": "prettier --check \"**/*.{js,json,md,yaml,yml}\""
 	},
 	"dependencies": {
 		"@modelcontextprotocol/client": "^2.3.1",
