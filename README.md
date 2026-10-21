@@ -180,8 +180,13 @@ an unknown argument, a missing one or an empty string is refused by name.
 The results read like the tools of the KiSS backend: the output then
 `Exit code 0 (12 ms)` or `Killed after 300 s`, numbered lines then
 `120 lines`, a listing then `14 entries, 3 hidden`, an image after
-`Image image/png 800x600, 51234 bytes`, `Created x, 3 lines, 52 bytes`,
-`Replaced at line 42 of x, 10 -> 14 bytes`. Long output keeps its head and
+`Image image/png 4000x3000, 812345 bytes, sent as image/jpeg 1920x1440,
+301234 bytes`, `Created x, 3 lines, 52 bytes`,
+`Replaced at line 42 of x, 10 -> 14 bytes`. An image goes as KiSS sends
+it: a JPEG that fits as it is, a WebP as it is or not at all, an opaque PNG
+that fits as it is when lighter than its JPEG, any other as a JPEG within
+`maxDimension` pixels, turned upright and laid on white, through libvips
+(sharp); one over `maxMegapixels` is never decoded. Long output keeps its head and
 its tail with the hidden bytes counted. Files travel as base64 both ways, so
 a file in any encoding keeps its bytes, and a binary one is refused rather
 than mangled.

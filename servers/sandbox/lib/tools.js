@@ -7,7 +7,8 @@
  * - bash_tool: the command on stdin, the merged output back with the exit
  *   code and the duration, a kill at the timeout named
  * - view: a directory two levels deep with the size of all each entry holds,
- *   an image with a line saying what it is, a text file with numbered lines
+ *   an image fitted within the limits after a line saying what it is and what
+ *   was sent, a text file with numbered lines
  * - create_file: a file written whole, empty or not, its directories made
  * - str_replace: the one place a file holds a string, replaced in place
  *
@@ -30,6 +31,7 @@ const fs = require('fs');
 const path = require('path');
 const config = require('../config.json');
 const { podmanExec, escapeShell } = require('./podman-executor');
+const { imageType, imageFit } = require('./image');
 const { textResult, imageResult } = require('../../../core/tool-result');
 
 // Load tools definitions from tools.json once at startup
@@ -42,6 +44,14 @@ const TOOLS_DEFINITIONS = rawDefinitions.map((tool) => ({
 }));
 
 const SCHEMAS = Object.fromEntries(TOOLS_DEFINITIONS.map((tool) => [tool.name, tool.inputSchema]));
+
+// The pixels view decodes at most, and the longest side and the JPEG quality
+// of an image it makes again
+const IMAGE_LIMITS = {
+	pixels: config.podman.maxMegapixels * 1000000,
+	side: config.podman.maxDimension,
+	quality: config.podman.jpegQuality
+};
 
 // Bytes a binary file shows a NUL byte in
 const BINARY_PROBE_BYTES = 65536;
@@ -179,7 +189,7 @@ function clipped(buffer) {
 
 /**
  * Shell lines that print a regular file as base64 then a FILE line, or one
- * line saying why not: BIG <size>, OTHER, NONE
+ * line saying why not: BIG <first bytes in base64>, OTHER, NONE
  * @param {string} quoted Path quoted for the shell
  * @returns {string}
  */
@@ -189,7 +199,7 @@ function readScript(quoted) {
 		`p=${quoted}`,
 		'if [ -f "$p" ]; then',
 		'  s=$(stat -c %s -- "$p")',
-		`  if [ "$s" -gt ${config.podman.fileLimitBytes} ]; then echo "BIG $s"; else base64 -w 0 -- "$p" && echo && echo FILE; fi`,
+		`  if [ "$s" -gt ${config.podman.fileLimitBytes} ]; then echo "BIG $(head -c 16 -- "$p" | base64 -w 0)"; else base64 -w 0 -- "$p" && echo && echo FILE; fi`,
 		'elif [ -e "$p" ]; then echo OTHER',
 		'else echo NONE',
 		'fi'
@@ -244,15 +254,17 @@ function marked(result) {
  * @param {string} filepath
  * @param {{head: Buffer, tail: Buffer, total: number, truncated: boolean}} result
  * @param {string} other What a path that is neither a file nor missing is called
+ * @param {boolean} images Whether an image too large is named an image
  * @returns {{data?: Buffer, error?: string}}
  */
-function fileOf(filepath, result, other) {
+function fileOf(filepath, result, other, images) {
 	const { marker, body } = marked(result);
 	if (marker === 'FILE' && !result.truncated) {
 		return { data: Buffer.from(body, 'base64') };
 	}
 	if (marker.startsWith('BIG ')) {
-		return { error: `File larger than ${config.podman.fileLimitBytes} bytes` };
+		const kind = images && imageType(Buffer.from(marker.slice(4), 'base64')) ? 'Image' : 'File';
+		return { error: `${kind} larger than ${config.podman.fileLimitBytes} bytes` };
 	}
 	if (marker === 'OTHER') {
 		return { error: `${other}: ${filepath}` };
@@ -261,67 +273,6 @@ function fileOf(filepath, result, other) {
 		return { error: `No such file or directory: ${filepath}` };
 	}
 	return { error: `Cannot read the file: ${bounded(result).trimEnd()}` };
-}
-
-/**
- * Image type of bytes, read from their magic numbers
- * @param {Buffer} data
- * @returns {string|undefined}
- */
-function imageType(data) {
-	if (data.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
-		return 'image/png';
-	}
-	if (data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff) {
-		return 'image/jpeg';
-	}
-	const ascii = data.subarray(0, 12).toString('latin1');
-	if (ascii.startsWith('GIF87a') || ascii.startsWith('GIF89a')) {
-		return 'image/gif';
-	}
-	if (ascii.startsWith('RIFF') && ascii.slice(8, 12) === 'WEBP') {
-		return 'image/webp';
-	}
-	return undefined;
-}
-
-/**
- * Width and height an image header declares, 0 x 0 when it declares none
- * @param {Buffer} data
- * @param {string} mime
- * @returns {{width: number, height: number}}
- */
-function imageSize(data, mime) {
-	if (mime === 'image/png' && data.length >= 24) {
-		return { width: data.readUInt32BE(16), height: data.readUInt32BE(20) };
-	}
-	if (mime === 'image/gif' && data.length >= 10) {
-		return { width: data.readUInt16LE(6), height: data.readUInt16LE(8) };
-	}
-	if (mime === 'image/webp' && data.length >= 30) {
-		const chunk = data.toString('latin1', 12, 16);
-		if (chunk === 'VP8X') {
-			return { width: data.readUIntLE(24, 3) + 1, height: data.readUIntLE(27, 3) + 1 };
-		}
-		if (chunk === 'VP8L') {
-			const bits = data.readUInt32LE(21);
-			return { width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1 };
-		}
-		if (chunk === 'VP8 ') {
-			return { width: data.readUInt16LE(26) & 0x3fff, height: data.readUInt16LE(28) & 0x3fff };
-		}
-	}
-	if (mime === 'image/jpeg') {
-		// The frame header of a start of frame segment, SOF0 to SOF15 but DHT, JPG and DAC
-		for (let at = 2; at + 9 <= data.length && data[at] === 0xff;) {
-			const marker = data[at + 1];
-			if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) {
-				return { width: data.readUInt16BE(at + 7), height: data.readUInt16BE(at + 5) };
-			}
-			at += 2 + data.readUInt16BE(at + 2);
-		}
-	}
-	return { width: 0, height: 0 };
 }
 
 /**
@@ -461,18 +412,23 @@ async function tool_view(args = {}) {
 		return textResult(listing(filepath, body));
 	}
 
-	const file = fileOf(filepath, result, 'Neither a regular file nor a directory');
+	const file = fileOf(filepath, result, 'Neither a regular file nor a directory', true);
 	if (file.error) {
 		return textResult(file.error, true);
 	}
 
-	const mime = imageType(file.data);
-	if (mime) {
-		const { width, height } = imageSize(file.data, mime);
-		return [
-			textResult(`Image ${mime} ${width}x${height}, ${file.data.length} bytes`),
-			imageResult(file.data.toString('base64'), mime)
-		];
+	if (imageType(file.data)) {
+		const sent = await imageFit(file.data, IMAGE_LIMITS);
+		if (sent.error) {
+			return textResult(sent.error, true);
+		}
+		const described = (mime, width, height, bytes) => `${mime} ${width}x${height}, ${bytes} bytes`;
+		let line = `Image ${described(sent.sourceMime, sent.sourceWidth, sent.sourceHeight, file.data.length)}`;
+		if (sent.made) {
+			line += `, sent as ${described(sent.mime, sent.width, sent.height, sent.data.length)}`;
+			line += sent.transparent ? ', its transparency laid on white' : '';
+		}
+		return [textResult(line), imageResult(sent.data.toString('base64'), sent.mime)];
 	}
 
 	if (file.data.subarray(0, BINARY_PROBE_BYTES).includes(0)) {
@@ -547,7 +503,7 @@ async function tool_str_replace(args = {}) {
 	}
 
 	const read = await podmanExec(readScript(escapeShell(filepath)), FILE_CAP_BYTES);
-	const file = fileOf(filepath, read, 'Not a regular file');
+	const file = fileOf(filepath, read, 'Not a regular file', false);
 	if (file.error) {
 		return textResult(file.error, true);
 	}

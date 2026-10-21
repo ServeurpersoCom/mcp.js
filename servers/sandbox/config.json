@@ -39,7 +39,10 @@
 		"containerUser": "root",
 		"timeout": 300,
 		"outputLimitBytes": 16384,
-		"fileLimitBytes": 33554432
+		"fileLimitBytes": 33554432,
+		"maxMegapixels": 100,
+		"maxDimension": 1920,
+		"jpegQuality": 85
 	},
 	"paths": {
 		"inputsRoot": "/var/www/ia/ssd/inputs",
