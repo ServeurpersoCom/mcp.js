@@ -6,8 +6,8 @@
  *
  * - bash_tool: the command on stdin, the merged output back with the exit
  *   code and the duration, a kill at the timeout named
- * - view: a directory two levels deep with the size of each entry, an image
- *   with a line saying what it is, a text file with numbered lines
+ * - view: a directory two levels deep with the size of all each entry holds,
+ *   an image with a line saying what it is, a text file with numbered lines
  * - create_file: a file written whole, empty or not, its directories made
  * - str_replace: the one place a file holds a string, replaced in place
  *
@@ -21,6 +21,9 @@
  *
  * Long output keeps its head and its tail, cut on line ends, the bytes hidden
  * between them counted
+ *
+ * The internal scripts run under the C locale, so the reason a system call
+ * gives comes back in plain ASCII, the way strerror words it
  */
 
 const fs = require('fs');
@@ -55,6 +58,52 @@ const FILE_CAP_BYTES = Math.ceil(config.podman.fileLimitBytes / 3) * 4 + 64;
  */
 function counted(n, one, many) {
 	return `${n} ${n === 1 ? one : many}`;
+}
+
+/**
+ * A size as du -h writes it: 512, 4.0K, 12K, 1.5M
+ * @param {number} n Bytes
+ * @returns {string}
+ */
+function human(n) {
+	if (n < 1024) {
+		return String(n);
+	}
+	const units = 'KMGTPE';
+	let v = n / 1024;
+	let u = 0;
+	while (v >= 1024 && u < 5) {
+		v /= 1024;
+		u++;
+	}
+	const tenth = Math.ceil(v * 10) / 10;
+	return tenth < 10 ? `${tenth.toFixed(1)}${units[u]}` : `${Math.ceil(v)}${units[u]}`;
+}
+
+/**
+ * An entry the listing shows: no hidden part, nothing below node_modules
+ * @param {string} rel Path relative to the listed directory, empty for itself
+ * @returns {boolean}
+ */
+function shown(rel) {
+	const parts = rel === '' ? [] : rel.split('/');
+	const last = parts[parts.length - 1];
+	return parts.every(
+		(part) => !part.startsWith('.') && !(part === 'node_modules' && part !== last)
+	);
+}
+
+/**
+ * A path of the listed directory as the given path joins it
+ * @param {string} given
+ * @param {string} rel
+ * @returns {string}
+ */
+function under(given, rel) {
+	if (rel === '') {
+		return given;
+	}
+	return given.endsWith('/') ? given + rel : `${given}/${rel}`;
 }
 
 /**
@@ -136,6 +185,7 @@ function clipped(buffer) {
  */
 function readScript(quoted) {
 	return [
+		'export LC_ALL=C',
 		`p=${quoted}`,
 		'if [ -f "$p" ]; then',
 		'  s=$(stat -c %s -- "$p")',
@@ -144,6 +194,38 @@ function readScript(quoted) {
 		'else echo NONE',
 		'fi'
 	].join('\n');
+}
+
+/**
+ * Shell lines that write base64 bytes to a file, its directory made, ending
+ * on MKDIR <reason> or WRITE <reason> when the system refuses
+ * @param {string} quoted Path quoted for the shell
+ * @param {Buffer} bytes
+ * @returns {string}
+ */
+function writeScript(quoted, bytes) {
+	return [
+		'export LC_ALL=C',
+		`p=${quoted}`,
+		'if ! m=$(mkdir -p -- "$(dirname -- "$p")" 2>&1); then echo "MKDIR ${m##*: }"; exit 1; fi',
+		`if ! w=$( { echo '${bytes.toString('base64')}' | base64 -d > "$p"; } 2>&1 ); then echo "WRITE \${w##*: }"; exit 1; fi`
+	].join('\n');
+}
+
+/**
+ * Why a write script failed, worded as KiSS words it
+ * @param {{head: Buffer, tail: Buffer, total: number, truncated: boolean}} result
+ * @returns {string}
+ */
+function writeFailure(result) {
+	const { marker } = marked(result);
+	if (marker.startsWith('MKDIR ')) {
+		return `Cannot make the directory: ${marker.slice(6)}`;
+	}
+	if (marker.startsWith('WRITE ')) {
+		return `Cannot write the file: ${marker.slice(6)}`;
+	}
+	return `Cannot write the file: ${bounded(result).trimEnd()}`;
 }
 
 /**
@@ -243,6 +325,57 @@ function imageSize(data, mime) {
 }
 
 /**
+ * A directory as KiSS lists it: every entry two levels deep sorted by path,
+ * each with the size of all the regular files it holds, then the count of the
+ * entries and of the hidden ones
+ * @param {string} given The path as the call gave it
+ * @param {string} body E and F records the directory script printed
+ * @returns {string}
+ */
+function listing(given, body) {
+	const sizes = new Map([['', 0]]);
+	let hidden = 0;
+	const files = [];
+	for (const record of body.split('\0')) {
+		if (record.startsWith('E')) {
+			const rel = record.slice(1);
+			const parent = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '';
+			const name = rel.slice(rel.lastIndexOf('/') + 1);
+			if (shown(rel)) {
+				sizes.set(rel, 0);
+			} else if (
+				name.startsWith('.') &&
+				shown(parent) &&
+				parent.slice(parent.lastIndexOf('/') + 1) !== 'node_modules'
+			) {
+				hidden++;
+			}
+		} else if (record.startsWith('F')) {
+			const space = record.indexOf(' ');
+			files.push([Number(record.slice(1, space)), record.slice(space + 1)]);
+		}
+	}
+
+	// A file counts in the root and in its two first ancestors, itself included
+	for (const [size, rel] of files) {
+		sizes.set('', sizes.get('') + size);
+		const parts = rel.split('/');
+		for (let depth = 1; depth <= Math.min(2, parts.length); depth++) {
+			const prefix = parts.slice(0, depth).join('/');
+			if (sizes.has(prefix)) {
+				sizes.set(prefix, sizes.get(prefix) + size);
+			}
+		}
+	}
+
+	const lines = [...sizes.keys()]
+		.sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)))
+		.map((rel) => `${human(sizes.get(rel))}\t${under(given, rel)}\n`);
+	const tail = hidden > 0 ? `, ${hidden} hidden` : '';
+	return clipped(Buffer.from(lines.join(''))) + counted(sizes.size - 1, 'entry', 'entries') + tail;
+}
+
+/**
  * Tool: bash_tool
  * The command on stdin, the merged output back with the exit code
  * @param {object} args Tool arguments
@@ -303,13 +436,16 @@ async function tool_view(args = {}) {
 		}
 	}
 
-	// One call: a directory listing then its hidden count and DIR, or the read script of a file
+	// One call: for a directory, its entries two levels deep (E) and every regular
+	// file below it with its size (F), NUL separated, then DIR; else the read script
 	const quoted = escapeShell(filepath);
 	const script = [
+		'export LC_ALL=C',
 		`if [ -d ${quoted} ]; then`,
 		`  cd ${quoted} || exit 1`,
-		"  find . -maxdepth 2 ! -path './.*' ! -path './*/.*' ! -path './node_modules/*' ! -path './*/node_modules/*' -exec du -sh {} \\; 2>/dev/null | sort -k2",
-		"  echo \"HIDDEN $(find . -mindepth 1 -maxdepth 2 -name '.*' ! -path './.*/*' ! -path './node_modules/*' | wc -l)\"",
+		"  find . -mindepth 1 -maxdepth 2 -printf 'E%P\\0' 2>/dev/null",
+		"  find . -type f -printf 'F%s %P\\0' 2>/dev/null",
+		'  echo',
 		'  echo DIR',
 		'else',
 		readScript(quoted),
@@ -319,22 +455,10 @@ async function tool_view(args = {}) {
 
 	const { marker, body } = marked(result);
 	if (marker === 'DIR') {
-		const lines = body.split('\n');
-		const hidden = Number(lines.pop().replace('HIDDEN ', ''));
-		// find lists from inside the directory, each entry goes back under the given path
-		const listing = lines
-			.filter((line) => line !== '')
-			.map((line) => {
-				const tab = line.indexOf('\t');
-				const rel = line.slice(tab + 1);
-				return `${line.slice(0, tab)}\t${rel === '.' ? filepath : path.posix.join(filepath, rel)}\n`;
-			});
-		const tail = hidden > 0 ? `, ${hidden} hidden` : '';
-		return textResult(
-			clipped(Buffer.from(listing.join(''))) +
-				counted(Math.max(0, listing.length - 1), 'entry', 'entries') +
-				tail
-		);
+		if (result.truncated) {
+			return textResult(`Directory too large to list: ${filepath}`, true);
+		}
+		return textResult(listing(filepath, body));
 	}
 
 	const file = fileOf(filepath, result, 'Neither a regular file nor a directory');
@@ -392,18 +516,14 @@ async function tool_create_file(args = {}) {
 
 	const text = args.file_text;
 	const quoted = escapeShell(filepath);
-	const script = [
-		`if [ -e ${quoted} ]; then echo THERE; fi`,
-		`mkdir -p -- "$(dirname -- ${quoted})" && echo '${Buffer.from(text).toString('base64')}' | base64 -d > ${quoted}`
-	].join('\n');
+	const script = `if [ -e ${quoted} ]; then echo THERE; fi\n${writeScript(quoted, Buffer.from(text))}`;
 	const result = await podmanExec(script);
-	const output = bounded(result);
 	if (result.exitCode !== 0) {
-		return textResult(`Cannot write the file: ${output.replace(/^THERE\n/, '').trimEnd()}`, true);
+		return textResult(writeFailure(result), true);
 	}
 
 	const lines = text.split('\n').length - 1 + (text !== '' && !text.endsWith('\n') ? 1 : 0);
-	const verb = output.startsWith('THERE') ? 'Overwrote' : 'Created';
+	const verb = bounded(result).startsWith('THERE') ? 'Overwrote' : 'Created';
 	return textResult(
 		`${verb} ${filepath}, ${counted(lines, 'line', 'lines')}, ${counted(Buffer.byteLength(text), 'byte', 'bytes')}`
 	);
@@ -460,11 +580,9 @@ async function tool_str_replace(args = {}) {
 		newBytes,
 		content.subarray(at + oldBytes.length)
 	]);
-	const write = await podmanExec(
-		`echo '${written.toString('base64')}' | base64 -d > ${escapeShell(filepath)}`
-	);
+	const write = await podmanExec(writeScript(escapeShell(filepath), written));
 	if (write.exitCode !== 0) {
-		return textResult(`Cannot write the file: ${bounded(write).trimEnd()}`, true);
+		return textResult(writeFailure(write), true);
 	}
 
 	return textResult(
