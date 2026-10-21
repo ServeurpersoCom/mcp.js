@@ -8,7 +8,8 @@
 				"properties": {},
 				"required": [],
 				"title": "MoltbookHomeInput",
-				"type": "object"
+				"type": "object",
+				"additionalProperties": false
 			}
 		}
 	},
@@ -47,7 +48,8 @@
 				},
 				"required": [],
 				"title": "MoltbookFeedInput",
-				"type": "object"
+				"type": "object",
+				"additionalProperties": false
 			}
 		}
 	},
@@ -60,7 +62,8 @@
 				"properties": {
 					"post_id": {
 						"title": "Post id",
-						"type": "string"
+						"type": "string",
+						"minLength": 1
 					},
 					"sort": {
 						"default": "best",
@@ -80,7 +83,8 @@
 				},
 				"required": ["post_id"],
 				"title": "MoltbookReadInput",
-				"type": "object"
+				"type": "object",
+				"additionalProperties": false
 			}
 		}
 	},
@@ -93,7 +97,8 @@
 				"properties": {
 					"q": {
 						"title": "Query, up to 500 characters",
-						"type": "string"
+						"type": "string",
+						"minLength": 1
 					},
 					"type": {
 						"default": "all",
@@ -113,7 +118,8 @@
 				},
 				"required": ["q"],
 				"title": "MoltbookSearchInput",
-				"type": "object"
+				"type": "object",
+				"additionalProperties": false
 			}
 		}
 	},
@@ -131,7 +137,8 @@
 				},
 				"required": [],
 				"title": "MoltbookProfileInput",
-				"type": "object"
+				"type": "object",
+				"additionalProperties": false
 			}
 		}
 	},
@@ -149,7 +156,8 @@
 				},
 				"required": [],
 				"title": "MoltbookSubmoltInput",
-				"type": "object"
+				"type": "object",
+				"additionalProperties": false
 			}
 		}
 	},
@@ -162,11 +170,13 @@
 				"properties": {
 					"submolt": {
 						"title": "Community to post in, general by default",
-						"type": "string"
+						"type": "string",
+						"minLength": 1
 					},
 					"title": {
 						"title": "Title, up to 300 characters",
-						"type": "string"
+						"type": "string",
+						"minLength": 1
 					},
 					"content": {
 						"title": "Body in markdown, up to 40000 characters",
@@ -179,7 +189,8 @@
 				},
 				"required": ["submolt", "title"],
 				"title": "MoltbookPostInput",
-				"type": "object"
+				"type": "object",
+				"additionalProperties": false
 			}
 		}
 	},
@@ -192,11 +203,13 @@
 				"properties": {
 					"post_id": {
 						"title": "Post id",
-						"type": "string"
+						"type": "string",
+						"minLength": 1
 					},
 					"content": {
 						"title": "Comment in markdown",
-						"type": "string"
+						"type": "string",
+						"minLength": 1
 					},
 					"parent_id": {
 						"title": "Comment id to reply to",
@@ -205,7 +218,8 @@
 				},
 				"required": ["post_id", "content"],
 				"title": "MoltbookCommentInput",
-				"type": "object"
+				"type": "object",
+				"additionalProperties": false
 			}
 		}
 	},
@@ -218,16 +232,19 @@
 				"properties": {
 					"verification_code": {
 						"title": "verification_code of the challenge",
-						"type": "string"
+						"type": "string",
+						"minLength": 1
 					},
 					"answer": {
 						"title": "Result with 2 decimals",
-						"type": "string"
+						"type": "string",
+						"minLength": 1
 					}
 				},
 				"required": ["verification_code", "answer"],
 				"title": "MoltbookVerifyInput",
-				"type": "object"
+				"type": "object",
+				"additionalProperties": false
 			}
 		}
 	},
@@ -241,11 +258,13 @@
 					"kind": {
 						"enum": ["post", "comment"],
 						"title": "What to vote on",
-						"type": "string"
+						"type": "string",
+						"minLength": 1
 					},
 					"id": {
 						"title": "Post or comment id",
-						"type": "string"
+						"type": "string",
+						"minLength": 1
 					},
 					"direction": {
 						"default": "up",
@@ -256,7 +275,8 @@
 				},
 				"required": ["kind", "id"],
 				"title": "MoltbookVoteInput",
-				"type": "object"
+				"type": "object",
+				"additionalProperties": false
 			}
 		}
 	},
@@ -270,11 +290,13 @@
 					"kind": {
 						"enum": ["agent", "submolt"],
 						"title": "What to follow",
-						"type": "string"
+						"type": "string",
+						"minLength": 1
 					},
 					"name": {
 						"title": "Agent or community name",
-						"type": "string"
+						"type": "string",
+						"minLength": 1
 					},
 					"follow": {
 						"default": true,
@@ -284,7 +306,8 @@
 				},
 				"required": ["kind", "name"],
 				"title": "MoltbookFollowInput",
-				"type": "object"
+				"type": "object",
+				"additionalProperties": false
 			}
 		}
 	}

@@ -55,6 +55,12 @@ Two servers exposing the same tool or prompt name is a naming mistake, and
 startup fails saying which name and which two servers. A tool declared in a
 `tools.json` without its handler fails startup the same way.
 
+Every call passes the law of its tool schema in the core before the handler
+runs: an argument the schema does not declare, a required one missing, a
+string that is not one, or one shorter than its `minLength`, is refused by
+name (`Unknown argument x`, `Path argument required`), the same way for
+every tool of every server.
+
 ## Run
 
 ```bash
@@ -174,8 +180,7 @@ run rootless by `podman.hostUser`. Every command enters it through
 | `str_replace` | Replace a unique string in a file, its other bytes untouched                         |
 
 All four take a mandatory `description` argument so the LLM states its
-intent on every call, and every call is checked against its schema first:
-an unknown argument, a missing one or an empty string is refused by name.
+intent on every call.
 
 The results read like the tools of the KiSS backend: the output then
 `Exit code 0 (12 ms)` or `Killed after 300 s`, numbered lines then

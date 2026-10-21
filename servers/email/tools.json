@@ -8,7 +8,8 @@
 				"properties": {},
 				"required": [],
 				"title": "EmailFoldersInput",
-				"type": "object"
+				"type": "object",
+				"additionalProperties": false
 			}
 		}
 	},
@@ -22,7 +23,8 @@
 					"folder": {
 						"default": "INBOX",
 						"title": "Folder path as email_folders lists it",
-						"type": "string"
+						"type": "string",
+						"minLength": 1
 					},
 					"limit": {
 						"default": 20,
@@ -64,7 +66,8 @@
 				},
 				"required": [],
 				"title": "EmailListInput",
-				"type": "object"
+				"type": "object",
+				"additionalProperties": false
 			}
 		}
 	},
@@ -77,7 +80,8 @@
 				"properties": {
 					"folder": {
 						"title": "Folder path as email_folders lists it",
-						"type": "string"
+						"type": "string",
+						"minLength": 1
 					},
 					"uid": {
 						"title": "Message uid as email_list shows it",
@@ -92,7 +96,8 @@
 				},
 				"required": ["folder", "uid"],
 				"title": "EmailReadInput",
-				"type": "object"
+				"type": "object",
+				"additionalProperties": false
 			}
 		}
 	}

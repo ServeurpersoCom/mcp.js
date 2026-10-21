@@ -73,8 +73,6 @@ function tool_memory_open(args) {
 	return textResult(blocks.join('\n\n'), opened === 0);
 }
 
-const MEMORY_WRITE_KEYS = ['name', 'description', 'old_str', 'new_str'];
-
 /**
  * Create an entry, edit its body, refresh its description
  * @param {{name: string, description?: string, old_str?: string, new_str?: string}} args
@@ -84,16 +82,6 @@ function tool_memory_write(args) {
 	const name = args.name;
 	const oldStr = args.old_str;
 	const newStr = args.new_str;
-
-	// An unknown key carries the text when its name is wrong, and the call
-	// then removes old_str or does nothing at all
-	const unknown = Object.keys(args).filter((key) => !MEMORY_WRITE_KEYS.includes(key));
-	if (unknown.length > 0) {
-		return textResult(
-			`Unknown argument ${unknown.join(', ')}, the text goes in old_str and new_str`,
-			true
-		);
-	}
 
 	let entry;
 	try {

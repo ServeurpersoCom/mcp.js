@@ -17,7 +17,8 @@
 				},
 				"required": [],
 				"title": "MemoryOpenInput",
-				"type": "object"
+				"type": "object",
+				"additionalProperties": false
 			}
 		}
 	},
@@ -30,11 +31,13 @@
 				"properties": {
 					"description": {
 						"title": "One line on what this entry covers, shown in the index",
-						"type": "string"
+						"type": "string",
+						"minLength": 1
 					},
 					"name": {
 						"title": "Entry name, <group>/<slug>",
-						"type": "string"
+						"type": "string",
+						"minLength": 1
 					},
 					"new_str": {
 						"title": "Replacement text, or the lines to append",
@@ -42,12 +45,14 @@
 					},
 					"old_str": {
 						"title": "Text to replace or remove, must appear exactly once in the body",
-						"type": "string"
+						"type": "string",
+						"minLength": 1
 					}
 				},
 				"required": ["name"],
 				"title": "MemoryWriteInput",
-				"type": "object"
+				"type": "object",
+				"additionalProperties": false
 			}
 		}
 	},
@@ -60,12 +65,14 @@
 				"properties": {
 					"name": {
 						"title": "Entry name, <group>/<slug>",
-						"type": "string"
+						"type": "string",
+						"minLength": 1
 					}
 				},
 				"required": ["name"],
 				"title": "MemoryDropInput",
-				"type": "object"
+				"type": "object",
+				"additionalProperties": false
 			}
 		}
 	}

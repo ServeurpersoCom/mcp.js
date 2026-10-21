@@ -3,9 +3,13 @@
  * Builds the low level Server of the v2 SDK over the aggregated tools and
  * prompts. Every transport serves instances from one factory: a fresh one per
  * HTTP request, one per stdio connection, so no state outlives its exchange
+ *
+ * A call reaches its handler only once its arguments pass the law of its
+ * schema, so a refusal reads the same for every tool of every server
  */
 
 const { Server } = require('@modelcontextprotocol/server');
+const { breach } = require('./tool-check');
 
 /**
  * Content block of a typed tool result
@@ -41,6 +45,7 @@ function createFactory(bundle) {
 	const { config, toolsModule, promptsModule } = bundle;
 	const tools = toolsModule.TOOLS_DEFINITIONS;
 	const handlers = toolsModule.TOOLS_MAPPING;
+	const schemas = Object.fromEntries(tools.map((tool) => [tool.name, tool.inputSchema]));
 	const prompts = promptsModule.PROMPTS_DEFINITIONS;
 	const templates = promptsModule.PROMPTS_MAPPING;
 
@@ -60,6 +65,10 @@ function createFactory(bundle) {
 			const { name, arguments: args } = request.params;
 			if (!handlers[name]) {
 				throw new Error(`Unknown tool: ${name}`);
+			}
+			const refused = breach(schemas[name], args ?? {});
+			if (refused) {
+				return { content: [{ type: 'text', text: refused }], isError: true };
 			}
 
 			let result;

@@ -12,9 +12,8 @@
  * - create_file: a file written whole, empty or not, its directories made
  * - str_replace: the one place a file holds a string, replaced in place
  *
- * Every call first passes the law of its schema: no unknown argument, every
- * required one present, a string where the schema says string and never
- * shorter than its minLength
+ * The core checks the arguments of every call against the schema of its tool
+ * before the handler runs
  *
  * A path is taken whole as given and one holding a NUL byte is refused. Files
  * travel as base64 in both directions, so no byte goes through a text decoder
@@ -42,8 +41,6 @@ const TOOLS_DEFINITIONS = rawDefinitions.map((tool) => ({
 	description: tool.function.description,
 	inputSchema: tool.function.parameters
 }));
-
-const SCHEMAS = Object.fromEntries(TOOLS_DEFINITIONS.map((tool) => [tool.name, tool.inputSchema]));
 
 // The pixels view decodes at most, and the longest side and the JPEG quality
 // of an image it makes again
@@ -114,39 +111,6 @@ function under(given, rel) {
 		return given;
 	}
 	return given.endsWith('/') ? given + rel : `${given}/${rel}`;
-}
-
-/**
- * The first breach of the schema of a tool by its arguments, or null
- * @param {string} tool
- * @param {object} args
- * @returns {string|null}
- */
-function breach(tool, args) {
-	const { properties, required } = SCHEMAS[tool];
-	const capital = (name) => name[0].toUpperCase() + name.slice(1);
-
-	const unknown = Object.keys(args).filter((key) => !(key in properties));
-	if (unknown.length > 0) {
-		return `Unknown argument ${unknown.join(', ')}`;
-	}
-	for (const name of required) {
-		if (args[name] === undefined) {
-			return `${capital(name)} argument required`;
-		}
-	}
-	for (const [name, value] of Object.entries(args)) {
-		if (properties[name].type !== 'string') {
-			continue;
-		}
-		if (typeof value !== 'string') {
-			return `${capital(name)} argument is not a string`;
-		}
-		if (value.length < (properties[name].minLength || 0)) {
-			return `${capital(name)} argument required`;
-		}
-	}
-	return null;
 }
 
 /**
@@ -333,11 +297,6 @@ function listing(given, body) {
  * @returns {Promise<object>} Tool result
  */
 async function tool_bash(args = {}) {
-	const refused = breach('bash_tool', args);
-	if (refused) {
-		return textResult(refused, true);
-	}
-
 	const t0 = Date.now();
 	const result = await podmanExec(args.command);
 	const elapsed = Date.now() - t0;
@@ -358,10 +317,6 @@ async function tool_bash(args = {}) {
  * @returns {Promise<object|object[]>} Tool result
  */
 async function tool_view(args = {}) {
-	const refused = breach('view', args);
-	if (refused) {
-		return textResult(refused, true);
-	}
 	const filepath = args.path;
 	if (filepath.includes('\0')) {
 		return textResult('Path holds a NUL byte', true);
@@ -461,10 +416,6 @@ async function tool_view(args = {}) {
  * @returns {Promise<object>} Tool result
  */
 async function tool_create_file(args = {}) {
-	const refused = breach('create_file', args);
-	if (refused) {
-		return textResult(refused, true);
-	}
 	const filepath = args.path;
 	if (filepath.includes('\0')) {
 		return textResult('Path holds a NUL byte', true);
@@ -493,10 +444,6 @@ async function tool_create_file(args = {}) {
  * @returns {Promise<object>} Tool result
  */
 async function tool_str_replace(args = {}) {
-	const refused = breach('str_replace', args);
-	if (refused) {
-		return textResult(refused, true);
-	}
 	const filepath = args.path;
 	if (filepath.includes('\0')) {
 		return textResult('Path holds a NUL byte', true);
