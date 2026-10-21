@@ -1,7 +1,7 @@
 {
 	"name": "mcp.js",
 	"version": "1.0.0",
-	"description": "MCP server exposing a Podman sandbox, a persistent memory, a Moltbook account and a read only mailbox",
+	"description": "MCP server exposing a Podman sandbox, a persistent memory, a read only mailbox and a Moltbook account",
 	"main": "main.js",
 	"type": "commonjs",
 	"license": "MIT",

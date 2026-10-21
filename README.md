@@ -1,8 +1,8 @@
 # mcp.js
 
 The Model Context Protocol server I run every day, published as it is. It
-serves a Podman sandbox, a persistent memory, an agent account on Moltbook
-and a read only mailbox to any MCP client, behind one endpoint. Built on the
+serves a Podman sandbox, a persistent memory, a read only mailbox and an
+agent account on Moltbook to any MCP client, behind one endpoint. Built on the
 official TypeScript SDK v2
 ([@modelcontextprotocol/server](https://github.com/modelcontextprotocol/typescript-sdk)),
 it speaks the 2026-07-28 revision of the protocol and the 2025 ones on the
@@ -16,22 +16,11 @@ same endpoint, each client getting the newest revision it knows.
 Four servers, the two transports of the specification (stdio, Streamable
 HTTP), every server aggregated behind one endpoint, zero framework.
 
-## Warning
+## Rootless Podman
 
-The sandbox server gives the connected LLM a root shell in a container.
-Everything the container can reach, the LLM reaches: its volumes, its
-network, its GPU. Keep the container rootless under a dedicated user, mount
-only what the LLM should touch, and treat what it writes as untrusted.
-
-Never expose the HTTP transport on a port reachable from the public internet
-without all three of:
-
-- `auth.mode` set to something other than `none` in `config.json`
-- HTTPS in front (reverse proxy)
-- an IP allowlist at the firewall level
-
-Without these, assume you handed the container over, and with the email
-server, your mailbox to read.
+The sandbox runs under rootless Podman, the minimum I recommend to work
+cleanly with an AI: no daemon running as root, the container belongs to an
+unprivileged user, and the LLM reaches only what its volumes mount.
 
 ## Install
 
@@ -51,8 +40,8 @@ core/              protocol, auth, and the three transports
 core/transports/   stdio, Streamable HTTP
 servers/sandbox/   bash_tool, view, create_file, str_replace in a Podman container
 servers/memory/    a persistent memory in plain files
-servers/moltbook/  an agent account on Moltbook
 servers/email/     a read only mailbox over IMAPS
+servers/moltbook/  an agent account on Moltbook
 mcp-bridge/        an OpenAI compatible proxy that runs the tools for MCP-less UIs
 main.js            binds every server to one transport
 ```
@@ -210,13 +199,6 @@ reads the index or the named entries, `memory_write` creates or edits an
 entry anchored on a unique string, `memory_drop` removes one. Every write
 goes to a temporary file then a rename.
 
-### moltbook
-
-An agent account on [Moltbook](https://www.moltbook.com), the social network
-for AI agents: home, feed, posts, comments, search, profiles, communities,
-votes, follows, and the verification challenge of each new post. The API key
-stays in `config.json` and never reaches the model.
-
 ### email
 
 A read only mailbox: `email_folders`, `email_list` (one line per message,
@@ -240,6 +222,13 @@ certificate carries when `host` is an address. `ca` pins the certificate of
 a server that signs its own, Dovecot out of the box: copy its public half
 next to `config.json` under that name. Leave `ca` empty for a server whose
 certificate a public authority signed.
+
+### moltbook
+
+An agent account on [Moltbook](https://www.moltbook.com), the social network
+for AI agents: home, feed, posts, comments, search, profiles, communities,
+votes, follows, and the verification challenge of each new post. The API key
+stays in `config.json` and never reaches the model.
 
 ## Bridge
 
