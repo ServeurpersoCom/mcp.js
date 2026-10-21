@@ -1,54 +1,41 @@
 # mcp.js
 
-Personal dev tool that exposes a local shell and filesystem to any Model
-Context Protocol client. Built on the official TypeScript SDK
+The Model Context Protocol server I run every day, published as it is. It
+serves a Podman sandbox, a persistent memory, an agent account on Moltbook
+and a read only mailbox to any MCP client, behind one endpoint. Built on the
+official TypeScript SDK
 ([@modelcontextprotocol/sdk](https://github.com/modelcontextprotocol/typescript-sdk),
-v1.29+), with a custom WebSocket server transport added on top since the
-SDK only ships stdio and Streamable HTTP on the server side.
-
-Runs anywhere Node.js and bash run: Linux, macOS, and Windows via WSL
-or Git Bash.
+v1.29+), with a custom WebSocket server transport added on top since the SDK
+only ships stdio and Streamable HTTP on the server side.
 
 - llama.cpp Svelte WebUI (native MCP client)
 - OpenAI ChatGPT (web, custom MCP server)
 - Anthropic Claude (web, custom MCP server)
+- any OpenAI compatible chat UI without an MCP client, through the bridge
 
-Four tools (`bash_tool`, `view`, `create_file`, `str_replace`), three
-transports (stdio, Streamable HTTP, WebSocket), every server aggregated
-behind one endpoint, zero framework.
+Four servers, three transports (stdio, Streamable HTTP, WebSocket), every
+server aggregated behind one endpoint, zero framework.
 
 ## Warning
 
-This server gives the connected LLM whatever shell privileges the Node
-process itself has. Launch it as root, the LLM runs as root. Launch it
-under your daily user on your personal desktop, the LLM can read your
-SSH keys, browser data and home directory, and wipe it all in one
-command. Running it as root on your personal machine is a bad idea
-unless you are fully aware of what you are doing.
+The sandbox server gives the connected LLM a root shell in a container.
+Everything the container can reach, the LLM reaches: its volumes, its
+network, its GPU. Keep the container rootless under a dedicated user, mount
+only what the LLM should touch, and treat what it writes as untrusted.
 
-Recommended deployment targets, from cheapest to most isolated:
-
-- Podman in userland, rootless, with a dedicated UID
-- A throwaway VM you can wipe
-- A dedicated Raspberry Pi sitting on a spare network segment
-
-Bonus use case: cyber audit. Point a frontier model at this server
-inside a container and watch it try to break out. If it escapes, you
-learn something useful about both the model and your container
-configuration.
-
-Never expose the HTTP or WebSocket transport on a port reachable from
-the public internet without all three of:
+Never expose the HTTP or WebSocket transport on a port reachable from the
+public internet without all three of:
 
 - `auth.mode` set to something other than `none` in `config.json`
 - HTTPS in front (reverse proxy)
 - an IP allowlist at the firewall level
 
-Without these, assume you handed the host over.
+Without these, assume you handed the container over, and with the email
+server, your mailbox to read.
 
 ## Install
 
-Requires Node.js 18+ and bash in PATH.
+Requires Node.js 18+, and Podman for the sandbox.
 
 ```bash
 git clone https://github.com/ServeurpersoCom/mcp.js
@@ -59,20 +46,25 @@ npm install
 ## Layout
 
 ```
-config.json      transport, credentials, and the identity served
-core/            protocol, auth, and the three transports
-core/transports/ stdio, Streamable HTTP, WebSocket
-servers/bash/    the bash server: config.json, tools.json, lib/
-main.js          binds every server to one transport
+config.json        transport, credentials, and the identity served
+core/              protocol, auth, and the three transports
+core/transports/   stdio, Streamable HTTP, WebSocket
+servers/sandbox/   bash_tool, view, create_file, str_replace in a Podman container
+servers/memory/    a persistent memory in plain files
+servers/moltbook/  an agent account on Moltbook
+servers/email/     a read only mailbox over IMAPS
+mcp-bridge/        an OpenAI compatible proxy that runs the tools for MCP-less UIs
+main.js            binds every server to one transport
 ```
 
 Every server under `servers/` is loaded at startup and their tools and
-prompts are served together, so a client connects once and sees them
-all. Adding a server means adding a directory under `servers/`, never
-touching `core/`.
+prompts are served together, so a client connects once and sees them all.
+Adding a server means adding a directory under `servers/`, never touching
+`core/`. Removing one means deleting its directory.
 
-Two servers exposing the same tool or prompt name is a naming mistake,
-and startup fails saying which name and which two servers.
+Two servers exposing the same tool or prompt name is a naming mistake, and
+startup fails saying which name and which two servers. A tool declared in a
+`tools.json` without its handler fails startup the same way.
 
 ## Run
 
@@ -82,73 +74,65 @@ node main.js streamable-http    # HTTP, port 8083
 node main.js websocket          # WebSocket, port 8084
 ```
 
-`main.js` takes a transport name, defaulting to `stdio`, and serves
-every server under `servers/`.
-
-### Network exposure
-
-Default bind address is `0.0.0.0` so a llama.cpp instance on your
-desktop can reach a sandbox running on a Raspberry Pi across the LAN
-without any config tweak. If you run everything on a single machine,
-set `host` to `127.0.0.1` in `config.json`. Do not expose the ports on
-the public internet unless you know exactly what you are doing, and
-even then, re-read the Warning section first.
+`main.js` takes a transport name, defaulting to `stdio`, and serves every
+server under `servers/`. The transports bind `127.0.0.1`: put a reverse
+proxy in front to reach them from elsewhere.
 
 ## Config
 
 Settings come from two files with disjoint roles. The root `config.json`
-holds the transport, the credentials and the identity the aggregate
-answers with. A `servers/<name>/config.json` holds that server's prompts
-and its own settings block, nothing else.
+holds the transport, the credentials and the identity the aggregate answers
+with. A `servers/<name>/config.json` holds that server's prompts and its own
+settings block, nothing else.
+
+The published files hold every setting I run with, secrets aside: the
+authentication secrets are empty, so the server refuses to start until you
+set them, and the service credentials read `changeme`. `example.com` stands
+for my domain.
 
 Root:
 
 ```json
 {
 	"auth": {
-		"mode": "none",
+		"mode": "oauth+static",
 		"clientId": "",
 		"clientSecret": "",
 		"password": "",
-		"staticToken": ""
+		"staticToken": "",
+		"storeDir": "data/oauth"
 	},
-	"streamable_http": { "host": "0.0.0.0", "port": 8083 },
-	"websocket": { "host": "0.0.0.0", "port": 8084 },
+	"streamable_http": { "host": "127.0.0.1", "port": 8083 },
+	"websocket": { "host": "127.0.0.1", "port": 8084 },
 	"mcp": {
 		"protocolVersion": "2025-06-18",
-		"serverName": "mcp-bash",
+		"serverName": "mcp-sandbox",
 		"serverVersion": "1.0.0",
 		"serverIcons": [
-			{ "src": "https://example.com/favicon-light.png", "mimeType": "image/png", "theme": "light" },
-			{ "src": "https://example.com/favicon-dark.png", "mimeType": "image/png", "theme": "dark" }
+			{
+				"src": "https://www.example.com/favicon-light.png",
+				"mimeType": "image/png",
+				"theme": "light"
+			},
+			{
+				"src": "https://www.example.com/favicon-dark.png",
+				"mimeType": "image/png",
+				"theme": "dark"
+			}
 		]
 	}
 }
 ```
 
-The bash server:
-
-```json
-{
-	"prompts": [],
-	"bash": {
-		"timeout": 300,
-		"outputLimitBytes": 4096,
-		"fileLimitBytes": 33554432
-	}
-}
-```
-
-One endpoint serves them all, so ports and identity belong to the root
-and a server never carries them. `prompts` holds the templates the
-server publishes over `prompts/list` and `prompts/get`, gathered from
-every server. `serverIcons` is optional and rides verbatim into the
-`initialize` response.
+One endpoint serves them all, so ports and identity belong to the root and a
+server never carries them. `prompts` holds the templates a server publishes
+over `prompts/list` and `prompts/get`, gathered from every server.
+`serverIcons` is optional and rides verbatim into the `initialize` response.
 
 ### Auth
 
-`auth.mode` selects the scheme for the HTTP and WebSocket transports.
-Stdio is never authenticated, it speaks over local pipes only.
+`auth.mode` selects the scheme for the HTTP and WebSocket transports. Stdio
+is never authenticated, it speaks over local pipes only.
 
 | Mode           | What is accepted                               |
 | -------------- | ---------------------------------------------- |
@@ -157,20 +141,20 @@ Stdio is never authenticated, it speaks over local pipes only.
 | `oauth`        | The OAuth 2.1 flow only                        |
 | `oauth+static` | Either of the two                              |
 
-`static` suits clients that cannot run an interactive flow. Every
-request carries `Authorization: Bearer <staticToken>`, matched in
-constant time. The WebSocket transport only ever understands this
-scheme, so it rejects every connection under `oauth`.
+`static` suits clients that cannot run an interactive flow. Every request
+carries `Authorization: Bearer <staticToken>`, matched in constant time. The
+WebSocket transport only ever understands this scheme, so it rejects every
+connection under `oauth`.
 
 `oauth` implements the smallest surface an MCP connector needs: dynamic
-client registration, a consent form gated by `password`, and token
-exchange with PKCE S256. `clientId`, `clientSecret` and `password` must
-all be set. Issued tokens live in memory, so a restart makes connectors
-register and authorize again.
+client registration, a consent form gated by `password`, and token exchange
+with PKCE S256. `clientId`, `clientSecret`, `password` and `storeDir` must
+all be set. Issued tokens are stored under `storeDir`, one file per token,
+so connectors stay authorized across restarts; `rm -rf data/oauth` revokes
+them all.
 
-The server aborts at startup on an unknown mode, on `static` with an
-empty `staticToken`, or on an OAuth mode missing one of its three
-secrets.
+The server aborts at startup on an unknown mode, on `static` with an empty
+`staticToken`, or on an OAuth mode missing one of its settings.
 
 Generate solid secrets:
 
@@ -180,21 +164,85 @@ openssl rand -hex 32
 
 Discovery follows RFC 9728: a request without a valid token gets a 401
 carrying a `WWW-Authenticate` header that points at
-`/.well-known/oauth-protected-resource` on the host the request came
-in on. Serve that document, and the matching
+`/.well-known/oauth-protected-resource` on the host the request came in on.
+Serve that document, and the matching
 `/.well-known/oauth-authorization-server`, from your reverse proxy.
 
-## Tools
+## Servers
 
-| Name          | Action                                                                |
-| ------------- | --------------------------------------------------------------------- |
-| `bash_tool`   | Run a bash command with timeout and output truncation                 |
-| `view`        | Read a file with line numbers and optional range, or list a directory |
-| `create_file` | Create a file with auto mkdir and base64 safe writes                  |
-| `str_replace` | Replace a unique string in a file, rejects ambiguous cases            |
+### sandbox
+
+A Debian container, built from `Containerfile` and declared in `pod.yaml`,
+run rootless by `podman.hostUser`. Every command enters it through
+`podman exec`, the script on stdin, under a timeout.
+
+| Name          | Action                                                                               |
+| ------------- | ------------------------------------------------------------------------------------ |
+| `bash_tool`   | Run a bash command: exit code, duration, a kill at the timeout named                 |
+| `view`        | Read a file with line numbers and an optional range, list a directory, show an image |
+| `create_file` | Create a file, its directories made, empty or not                                    |
+| `str_replace` | Replace a unique string in a file, its other bytes untouched                         |
 
 All four take a mandatory `description` argument so the LLM states its
-intent on every call. Shows up in logs, useful for audit.
+intent on every call. Long output keeps its head and its tail with the
+hidden bytes counted. Files travel as base64 both ways, so a file in any
+encoding keeps its bytes, and a binary one is refused rather than mangled.
+
+`sandbox-manager.js` drives the pod: `build`, `destroy`, `start`, `stop`,
+`reset` (a fresh container from the existing image), `status`, `logs`,
+`shell`. `paths` names the host directories mounted as `/mnt/inputs`,
+`/mnt/workspace` and `/mnt/outputs`.
+
+### memory
+
+A memory that outlives conversations: one Markdown file per entry under
+`data/<group>/<slug>.md`, an index of one line per entry. `memory_open`
+reads the index or the named entries, `memory_write` creates or edits an
+entry anchored on a unique string, `memory_drop` removes one. Every write
+goes to a temporary file then a rename.
+
+### moltbook
+
+An agent account on [Moltbook](https://www.moltbook.com), the social network
+for AI agents: home, feed, posts, comments, search, profiles, communities,
+votes, follows, and the verification challenge of each new post. The API key
+stays in `config.json` and never reaches the model.
+
+### email
+
+A read only mailbox: `email_folders`, `email_list` (one line per message,
+filtered on the server, paged by uid) and `email_read` (the headers a client
+shows, or the raw block for provenance questions). Every folder opens with
+`EXAMINE`, so nothing changes and reading leaves a message unseen.
+
+```json
+{
+	"host": "192.168.0.2",
+	"port": 993,
+	"servername": "mail.example.com",
+	"ca": "mail.example.com.pem",
+	"user": "pascal",
+	"password": "changeme"
+}
+```
+
+IMAPS only, the certificate always checked. `servername` is the name the
+certificate carries when `host` is an address. `ca` pins the certificate of
+a server that signs its own, Dovecot out of the box: copy its public half
+next to `config.json` under that name. Leave `ca` empty for a server whose
+certificate a public authority signed.
+
+## Bridge
+
+`mcp-bridge/` serves `/v1/chat/completions` in front of an OpenAI compatible
+endpoint (`proxy.apiUrl`, llama-server for me) and runs the tool calls of the
+model itself, through the servers of this repository over stdio, until the
+model answers. A chat UI without an MCP client gets the tools that way, each
+call and its result shown in the conversation.
+
+```bash
+node mcp-bridge/main.js
+```
 
 ## Client setup
 
@@ -202,13 +250,13 @@ intent on every call. Shows up in logs, useful for audit.
 
 In the MCP settings panel, add the server:
 
-- URL: `http://your-host:8083`
-- Header: `Authorization: Bearer <token>`
+- URL: `https://your-host/your-path`
+- Header: `Authorization: Bearer <staticToken>`
 
 ### OpenAI ChatGPT / Anthropic Claude web (Streamable HTTP)
 
-Declare the server in the app's MCP connector configuration with the
-same URL and Authorization header.
+Declare the server as a custom connector with its URL; the OAuth flow asks
+for `password` once.
 
 ### Claude Desktop (stdio)
 
@@ -225,8 +273,8 @@ same URL and Authorization header.
 
 ## Status
 
-Personal Swiss army knife. Evolves with my needs and what friends and
-users ask for. Issues and PRs welcome.
+Personal Swiss army knife. Evolves with my needs and what friends and users
+ask for. Issues and PRs welcome.
 
 ## License
 

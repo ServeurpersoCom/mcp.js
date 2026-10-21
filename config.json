@@ -1,6 +1,6 @@
 {
 	"auth": {
-		"mode": "none",
+		"mode": "oauth+static",
 		"clientId": "",
 		"clientSecret": "",
 		"password": "",
@@ -8,25 +8,25 @@
 		"storeDir": "data/oauth"
 	},
 	"streamable_http": {
-		"host": "0.0.0.0",
+		"host": "127.0.0.1",
 		"port": 8083
 	},
 	"websocket": {
-		"host": "0.0.0.0",
+		"host": "127.0.0.1",
 		"port": 8084
 	},
 	"mcp": {
 		"protocolVersion": "2025-06-18",
-		"serverName": "mcp-bash",
+		"serverName": "mcp-sandbox",
 		"serverVersion": "1.0.0",
 		"serverIcons": [
 			{
-				"src": "https://example.com/favicon-light.png",
+				"src": "https://www.example.com/favicon-light.png",
 				"mimeType": "image/png",
 				"theme": "light"
 			},
 			{
-				"src": "https://example.com/favicon-dark.png",
+				"src": "https://www.example.com/favicon-dark.png",
 				"mimeType": "image/png",
 				"theme": "dark"
 			}
