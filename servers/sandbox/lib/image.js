@@ -8,7 +8,8 @@
  *
  * The size and the EXIF orientation are read from the header before anything
  * decodes the image, so an image over the pixel limit is never decoded. The
- * decoding, resizing and encoding run in libvips through sharp
+ * decoding, resizing and encoding run in libvips through sharp, a resize in
+ * scRGB, linear light in floating point, so dark gradients keep every level
  */
 
 const sharp = require('sharp');
@@ -186,7 +187,10 @@ async function imageFit(bytes, limits) {
 			pipeline = pipeline.rotate();
 		}
 		if (out.width !== uprightW || out.height !== uprightH) {
-			pipeline = pipeline.gamma().resize(out.width, out.height, { fit: 'fill' });
+			pipeline = pipeline
+				.pipelineColourspace('scrgb')
+				.resize(out.width, out.height, { fit: 'fill' })
+				.toColourspace('srgb');
 		}
 		out.data = await pipeline
 			.flatten({ background: '#ffffff' })
