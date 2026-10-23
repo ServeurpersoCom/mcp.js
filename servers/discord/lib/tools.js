@@ -12,8 +12,7 @@
  * goes out with allowed_mentions empty, so nothing written pings a member, a
  * role or everyone. No tool deletes anything
  *
- * A forum post opens a thread, refused when a thread of the same name already
- * exists in that forum, active or archived
+ * A forum post opens a thread
  *
  * Every handler renders compact lines, an API failure becoming an error result
  * that carries the status and the body, 429 and its retry_after included
@@ -158,31 +157,6 @@ function archivedThreads(ch, before) {
 }
 
 /**
- * Id of the thread of a channel bearing exactly this name, active or archived
- * @param {object} ch
- * @param {string} name
- * @returns {Promise<string|null>}
- */
-async function findThread(ch, name) {
-	const active = (await activeThreads(ch)).find((t) => t.name === name);
-	if (active) {
-		return active.id;
-	}
-	let before;
-	for (;;) {
-		const page = await archivedThreads(ch, before);
-		const found = page.threads.find((t) => t.name === name);
-		if (found) {
-			return found.id;
-		}
-		if (!page.has_more || page.threads.length === 0) {
-			return null;
-		}
-		before = page.threads[page.threads.length - 1].thread_metadata.archive_timestamp;
-	}
-}
-
-/**
  * Channels of every guild the bot is in, grouped under their category
  */
 async function channels() {
@@ -307,11 +281,6 @@ async function post({ channel: id, content, thread_name, tags }) {
 		}
 		return ids[name];
 	});
-
-	const existing = await findThread(ch, thread_name);
-	if (existing) {
-		throw new Error(`Thread "${thread_name}" already exists in #${ch.name}: ${existing}`);
-	}
 
 	const t = await call('POST', `/channels/${ch.id}/threads`, {
 		body: {

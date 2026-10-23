@@ -72,7 +72,7 @@
 		"type": "function",
 		"function": {
 			"name": "discord_post",
-			"description": "Post in a channel or thread, or open a thread when the channel is a forum: thread_name is then required, and a thread of the same name already in the forum, active or archived, refuses the post. Nothing posted pings anyone. Only when the user asks.",
+			"description": "Post in a channel or thread, or open a thread when the channel is a forum, thread_name then required. Nothing posted pings anyone. Only when the user asks.",
 			"parameters": {
 				"properties": {
 					"channel": {

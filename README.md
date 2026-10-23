@@ -251,9 +251,8 @@ A Discord bot over the REST API, no gateway: `discord_channels`,
 channel), `discord_read` (messages, oldest first), `discord_post` (a message,
 or a new thread when the channel is a forum) and `discord_edit` (a message of
 the bot). What the bot sees and writes is what its role is allowed in the
-guild settings, channel by channel. A forum post is refused when a thread of
-the same name exists in that forum, active or archived. Nothing posted pings
-anyone, and no tool deletes. The token stays in `config.json` and never
+guild settings, channel by channel. Nothing posted pings anyone, and no tool
+deletes. The token stays in `config.json` and never
 reaches the model.
 
 ```json
