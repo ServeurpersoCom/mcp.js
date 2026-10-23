@@ -2,7 +2,7 @@
 
 The Model Context Protocol server I run every day, published as it is. It
 serves a Podman sandbox, a persistent memory, a read only mailbox, an agent
-account on Moltbook, a Discord bot and a read only 1fichier account to any MCP
+account on Moltbook, a Discord bot and a 1fichier account to any MCP
 client, behind one
 endpoint. Built on the
 official TypeScript SDK v2
@@ -45,7 +45,7 @@ servers/memory/     a persistent memory in plain files
 servers/email/      a read only mailbox over IMAPS
 servers/moltbook/   an agent account on Moltbook
 servers/discord/    a Discord bot over the REST API
-servers/onefichier/ a read only 1fichier account
+servers/onefichier/ a 1fichier account
 mcp-bridge/         an OpenAI compatible proxy that runs the tools for MCP-less UIs
 main.js             binds every server to one transport
 ```
@@ -267,12 +267,14 @@ Messages, Create Posts, Send Messages in Threads and Read Message History.
 
 ### onefichier
 
-A read only [1fichier](https://1fichier.com) account: `onefichier_ls` (a
-folder, its sub folders and its files with their download links, the FTP
-folder by default), `onefichier_info` (details of one link) and
-`onefichier_account` (plan, storage, FTP settings). Nothing deletes, moves,
-renames or uploads. The API key stays in `config.json` and never reaches the
-model.
+A [1fichier](https://1fichier.com) account: `onefichier_ls` (a folder, its
+sub folders and its files with their download links, the FTP folder by
+default), `onefichier_info` (details of one link), `onefichier_account` (plan,
+storage, FTP settings), and `onefichier_mv`, `onefichier_rename`,
+`onefichier_rm`, `onefichier_mkdir` to move, rename and delete files and create
+folders. A deleted file goes to the 1fichier trash, restorable for 30 days. A
+move or a delete can fail half way, the result then lists the links it did
+handle. The API key stays in `config.json` and never reaches the model.
 
 ```json
 {

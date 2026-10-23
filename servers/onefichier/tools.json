@@ -51,5 +51,107 @@
 				"additionalProperties": false
 			}
 		}
+	},
+	{
+		"type": "function",
+		"function": {
+			"name": "onefichier_mv",
+			"description": "Move one or more 1fichier files to a folder (0 for the root), renaming the file when only one is moved. A move can fail half way: the result then lists the links that did move.",
+			"parameters": {
+				"properties": {
+					"urls": {
+						"title": "Download links, https://1fichier.com/? followed by 5 to 20 lowercase letters and digits",
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"folder_id": {
+						"title": "Destination folder id, 0 for the root",
+						"type": "integer"
+					},
+					"rename": {
+						"title": "New file name, single file only",
+						"type": "string",
+						"minLength": 1
+					}
+				},
+				"required": ["urls", "folder_id"],
+				"title": "OnefichierMvInput",
+				"type": "object",
+				"additionalProperties": false
+			}
+		}
+	},
+	{
+		"type": "function",
+		"function": {
+			"name": "onefichier_rename",
+			"description": "Rename one 1fichier file.",
+			"parameters": {
+				"properties": {
+					"url": {
+						"title": "Download link",
+						"type": "string",
+						"minLength": 1
+					},
+					"filename": {
+						"title": "New file name",
+						"type": "string",
+						"minLength": 1
+					}
+				},
+				"required": ["url", "filename"],
+				"title": "OnefichierRenameInput",
+				"type": "object",
+				"additionalProperties": false
+			}
+		}
+	},
+	{
+		"type": "function",
+		"function": {
+			"name": "onefichier_rm",
+			"description": "Delete one or more 1fichier files. They go to the 1fichier trash and can be restored for 30 days. A delete can fail half way: the result then lists the links that were deleted.",
+			"parameters": {
+				"properties": {
+					"urls": {
+						"title": "Download links, https://1fichier.com/? followed by 5 to 20 lowercase letters and digits",
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					}
+				},
+				"required": ["urls"],
+				"title": "OnefichierRmInput",
+				"type": "object",
+				"additionalProperties": false
+			}
+		}
+	},
+	{
+		"type": "function",
+		"function": {
+			"name": "onefichier_mkdir",
+			"description": "Create a 1fichier folder, at the root or inside folder_id.",
+			"parameters": {
+				"properties": {
+					"name": {
+						"title": "Folder name, up to 250 characters",
+						"type": "string",
+						"minLength": 1
+					},
+					"folder_id": {
+						"title": "Parent folder id, the root by default",
+						"type": "integer"
+					}
+				},
+				"required": ["name"],
+				"title": "OnefichierMkdirInput",
+				"type": "object",
+				"additionalProperties": false
+			}
+		}
 	}
 ]
