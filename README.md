@@ -2,7 +2,8 @@
 
 The Model Context Protocol server I run every day, published as it is. It
 serves a Podman sandbox, a persistent memory, a read only mailbox, an agent
-account on Moltbook and a Discord bot to any MCP client, behind one
+account on Moltbook, a Discord bot and a read only 1fichier account to any MCP
+client, behind one
 endpoint. Built on the
 official TypeScript SDK v2
 ([@modelcontextprotocol/server](https://github.com/modelcontextprotocol/typescript-sdk)),
@@ -36,16 +37,17 @@ npm install
 ## Layout
 
 ```
-config.json        transport, credentials, and the identity served
-core/              protocol, auth, and the three transports
-core/transports/   stdio, Streamable HTTP
-servers/sandbox/   bash_tool, view, create_file, str_replace in a Podman container
-servers/memory/    a persistent memory in plain files
-servers/email/     a read only mailbox over IMAPS
-servers/moltbook/  an agent account on Moltbook
-servers/discord/   a Discord bot over the REST API
-mcp-bridge/        an OpenAI compatible proxy that runs the tools for MCP-less UIs
-main.js            binds every server to one transport
+config.json         transport, credentials, and the identity served
+core/               protocol, auth, and the three transports
+core/transports/    stdio, Streamable HTTP
+servers/sandbox/    bash_tool, view, create_file, str_replace in a Podman container
+servers/memory/     a persistent memory in plain files
+servers/email/      a read only mailbox over IMAPS
+servers/moltbook/   an agent account on Moltbook
+servers/discord/    a Discord bot over the REST API
+servers/onefichier/ a read only 1fichier account
+mcp-bridge/         an OpenAI compatible proxy that runs the tools for MCP-less UIs
+main.js             binds every server to one transport
 ```
 
 Every server under `servers/` is loaded at startup and their tools and
@@ -263,6 +265,27 @@ reaches the model.
 Create the bot in the Discord Developer Portal, enable its Message Content
 intent so `discord_read` sees the text, and invite it with View Channel, Send
 Messages, Create Posts, Send Messages in Threads and Read Message History.
+
+### onefichier
+
+A read only [1fichier](https://1fichier.com) account: `onefichier_ls` (a
+folder, its sub folders and its files with their download links, the FTP
+folder by default), `onefichier_info` (details of one link) and
+`onefichier_account` (plan, storage, FTP settings). Nothing deletes, moves,
+renames or uploads. The API key stays in `config.json` and never reaches the
+model.
+
+```json
+{
+	"apiKey": "changeme",
+	"ftpFolderId": 0
+}
+```
+
+`ftpFolderId` is the `ftp_did` that `onefichier_account` shows, the folder
+where FTP uploads land once processed. The API allows one listing per folder
+every 30 seconds and bans for a while after repeated errors, so links are
+checked before any call and nothing retries.
 
 ## Bridge
 

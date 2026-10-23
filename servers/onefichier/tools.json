@@ -1,0 +1,55 @@
+[
+	{
+		"type": "function",
+		"function": {
+			"name": "onefichier_ls",
+			"description": "A 1fichier folder: its sub folders, then its files newest first, one line each: date, size in bytes, download link, file name. The FTP folder, where FTP uploads land once processed, by default. One listing per folder every 30 seconds, the API bans after repeated errors.",
+			"parameters": {
+				"properties": {
+					"folder_id": {
+						"title": "Folder id, 0 for the root, the FTP folder by default",
+						"type": "integer"
+					}
+				},
+				"required": [],
+				"title": "OnefichierLsInput",
+				"type": "object",
+				"additionalProperties": false
+			}
+		}
+	},
+	{
+		"type": "function",
+		"function": {
+			"name": "onefichier_info",
+			"description": "Details of one 1fichier link: name, size, date, folder, path, type, checksum, protections.",
+			"parameters": {
+				"properties": {
+					"url": {
+						"title": "Download link, https://1fichier.com/? followed by 5 to 20 lowercase letters and digits",
+						"type": "string",
+						"minLength": 1
+					}
+				},
+				"required": ["url"],
+				"title": "OnefichierInfoInput",
+				"type": "object",
+				"additionalProperties": false
+			}
+		}
+	},
+	{
+		"type": "function",
+		"function": {
+			"name": "onefichier_account",
+			"description": "Plan, storage use and FTP settings of the 1fichier account (ftp_did is the FTP folder, ftp_mode 0 processes uploads automatically). One call every 5 minutes.",
+			"parameters": {
+				"properties": {},
+				"required": [],
+				"title": "OnefichierAccountInput",
+				"type": "object",
+				"additionalProperties": false
+			}
+		}
+	}
+]
