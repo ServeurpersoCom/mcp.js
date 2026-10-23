@@ -1,11 +1,12 @@
 /**
  * Discord Tools Module
- * Exposes a bot account on one Discord guild over the REST API, no gateway
+ * Exposes a bot account over the Discord REST API, no gateway
  *
- * - discord_channels, discord_threads, discord_read: read any channel of the
- *   configured guild
- * - discord_post, discord_edit: write, only in the channels listed in
- *   discord.writeChannels and in the threads they hold
+ * - discord_channels, discord_threads, discord_read: read
+ * - discord_post, discord_edit: write
+ *
+ * What the bot may see and write is the permissions Discord grants its role,
+ * set per channel in the guild settings
  *
  * The bot token stays in config.json and never reaches the model. Every write
  * goes out with allowed_mentions empty, so nothing written pings a member, a
@@ -41,7 +42,6 @@ const TYPES = {
 	15: 'forum',
 	16: 'media'
 };
-const THREAD_TYPES = [10, 11, 12];
 const FORUM_TYPES = [15, 16];
 const THREAD_HOLDERS = [0, 5, 15, 16];
 const NO_MENTIONS = { parse: [] };
@@ -100,35 +100,12 @@ function when(id) {
 }
 
 /**
- * The guild id of config.json
- * @returns {string}
- */
-function guild() {
-	return snowflake(config.guildId, 'discord.guildId');
-}
-
-/**
- * A channel or thread of the configured guild
+ * A channel or thread the bot sees
  * @param {string} id
  * @returns {Promise<object>}
  */
-async function channel(id) {
-	const ch = await call('GET', `/channels/${snowflake(id, 'channel')}`);
-	if (ch.guild_id !== guild()) {
-		throw new Error(`Channel ${id} is not in the configured guild`);
-	}
-	return ch;
-}
-
-/**
- * Whether the bot may write in a channel: listed in discord.writeChannels, or
- * a thread of a listed channel
- * @param {object} ch
- * @returns {boolean}
- */
-function writable(ch) {
-	const list = config.writeChannels;
-	return list.includes(ch.id) || (THREAD_TYPES.includes(ch.type) && list.includes(ch.parent_id));
+function channel(id) {
+	return call('GET', `/channels/${snowflake(id, 'channel')}`);
 }
 
 /**
@@ -162,7 +139,7 @@ function threadLine(t, tags, archived) {
  * @returns {Promise<object[]>}
  */
 async function activeThreads(ch) {
-	const data = await call('GET', `/guilds/${guild()}/threads/active`);
+	const data = await call('GET', `/guilds/${ch.guild_id}/threads/active`);
 	return data.threads
 		.filter((t) => t.parent_id === ch.id)
 		.sort((a, b) => (BigInt(b.id) > BigInt(a.id) ? 1 : -1));
@@ -206,10 +183,24 @@ async function findThread(ch, name) {
 }
 
 /**
- * Channels of the guild, grouped under their category
+ * Channels of every guild the bot is in, grouped under their category
  */
 async function channels() {
-	const list = await call('GET', `/guilds/${guild()}/channels`);
+	const guilds = await call('GET', '/users/@me/guilds');
+	const blocks = [];
+	for (const g of guilds) {
+		blocks.push(`guild ${g.id} ${g.name}\n` + (await guildChannels(g.id)));
+	}
+	return blocks.join('\n') || 'No guild';
+}
+
+/**
+ * Channels of one guild, one line each, sorted by category then position
+ * @param {string} id
+ * @returns {Promise<string>}
+ */
+async function guildChannels(id) {
+	const list = await call('GET', `/guilds/${id}/channels`);
 	const byId = Object.fromEntries(list.map((c) => [c.id, c]));
 	const rank = (c) => {
 		const parent = byId[c.parent_id];
@@ -229,8 +220,7 @@ async function channels() {
 			return (
 				`${c.id} ${TYPES[c.type] || c.type} #${c.name}` +
 				(parent ? ` | in ${parent.name}` : '') +
-				(tags.length ? ` | tags ${tags.join(' ')}` : '') +
-				(writable(c) ? ' | write' : '')
+				(tags.length ? ` | tags ${tags.join(' ')}` : '')
 			);
 		});
 	return lines.join('\n') || 'No channel';
@@ -293,9 +283,6 @@ async function read({ channel: id, before, limit = MESSAGES_PAGE }) {
  */
 async function post({ channel: id, content, thread_name, tags }) {
 	const ch = await channel(id);
-	if (!writable(ch)) {
-		throw new Error(`#${ch.name} is not writable, see discord.writeChannels`);
-	}
 
 	if (!FORUM_TYPES.includes(ch.type)) {
 		if (thread_name != null || tags != null) {
@@ -342,9 +329,6 @@ async function post({ channel: id, content, thread_name, tags }) {
  */
 async function edit({ channel: id, message_id, content }) {
 	const ch = await channel(id);
-	if (!writable(ch)) {
-		throw new Error(`#${ch.name} is not writable, see discord.writeChannels`);
-	}
 	const m = await call(
 		'PATCH',
 		`/channels/${ch.id}/messages/${snowflake(message_id, 'message_id')}`,
