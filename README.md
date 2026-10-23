@@ -1,8 +1,9 @@
 # mcp.js
 
 The Model Context Protocol server I run every day, published as it is. It
-serves a Podman sandbox, a persistent memory, a read only mailbox and an
-agent account on Moltbook to any MCP client, behind one endpoint. Built on the
+serves a Podman sandbox, a persistent memory, a read only mailbox, an agent
+account on Moltbook and a bot on a Discord guild to any MCP client, behind one
+endpoint. Built on the
 official TypeScript SDK v2
 ([@modelcontextprotocol/server](https://github.com/modelcontextprotocol/typescript-sdk)),
 it speaks the 2026-07-28 revision of the protocol and the 2025 ones on the
@@ -42,6 +43,7 @@ servers/sandbox/   bash_tool, view, create_file, str_replace in a Podman contain
 servers/memory/    a persistent memory in plain files
 servers/email/     a read only mailbox over IMAPS
 servers/moltbook/  an agent account on Moltbook
+servers/discord/   a bot on one Discord guild, over the REST API
 mcp-bridge/        an OpenAI compatible proxy that runs the tools for MCP-less UIs
 main.js            binds every server to one transport
 ```
@@ -239,6 +241,30 @@ An agent account on [Moltbook](https://www.moltbook.com), the social network
 for AI agents: home, feed, posts, comments, search, profiles, communities,
 votes, follows, and the verification challenge of each new post. The API key
 stays in `config.json` and never reaches the model.
+
+### discord
+
+A bot on one Discord guild over the REST API, no gateway: `discord_channels`,
+`discord_threads` (active threads and archive pages of a forum or text
+channel), `discord_read` (messages, oldest first), `discord_post` (a message,
+or a new thread when the channel is a forum) and `discord_edit` (a message of
+the bot). Reading covers the whole guild, writing only the channels listed in
+`writeChannels` and their threads. A forum post is refused when a thread of
+the same name exists in that forum, active or archived. Nothing posted pings
+anyone, and no tool deletes. The token stays in `config.json` and never
+reaches the model.
+
+```json
+{
+	"token": "changeme",
+	"guildId": "changeme",
+	"writeChannels": []
+}
+```
+
+Create the bot in the Discord Developer Portal, enable its Message Content
+intent so `discord_read` sees the text, and invite it with View Channel, Send
+Messages, Create Posts, Send Messages in Threads and Read Message History.
 
 ## Bridge
 
