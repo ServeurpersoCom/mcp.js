@@ -13,6 +13,7 @@
  *   marking them read as the client does
  * - discord_user_search: the messages a search finds in a server or a direct
  *   message
+ * - discord_user_image: an attached image, as the model sees it
  * - discord_user_post: a message, a reply, or a thread when the channel is a
  *   forum
  * - discord_user_edit: new content for a message of the account
@@ -31,6 +32,7 @@
 const { pageTarget, evaluate } = require('./cdp');
 const { withEndpoint } = require('./tunnel');
 const snippets = require('./snippets');
+const { imageType, imageResults } = require('../../../core/image');
 const { textResult } = require('../../../core/tool-result');
 
 const config = require('../config.json').discorduser;
@@ -46,6 +48,12 @@ const SNOWFLAKE = /^\d{17,20}$/;
 const ARCHIVE_STAMP = /^\d{4}-\d{2}-\d{2}T[\d:.+-]+$/;
 const MESSAGES_PAGE = 50;
 const MESSAGES_MAX = 100;
+const IMAGE_HOSTS = ['cdn.discordapp.com', 'media.discordapp.net'];
+const IMAGE_LIMITS = {
+	pixels: config.maxMegapixels * 1000000,
+	side: config.maxDimension,
+	quality: config.jpegQuality
+};
 const SEARCH_PAGE = 25;
 const SEARCH_OFFSET_MAX = 9975;
 const DM_GUILD = '@me';
@@ -117,14 +125,18 @@ function run(expression) {
 
 /**
  * Turn a handler into a tool, a thrown error becoming an error result and the
- * text keeping its head when it exceeds the output limit
- * @param {function(object): Promise<string>} handler
+ * text keeping its head when it exceeds the output limit; results a handler
+ * already made, an image, pass as they are
+ * @param {function(object): Promise<string|object|object[]>} handler
  * @returns {function(object): Promise<object>}
  */
 function tool(handler) {
 	return async (args) => {
 		try {
 			let text = await handler(args);
+			if (typeof text !== 'string') {
+				return text;
+			}
 			const bytes = Buffer.byteLength(text);
 			if (bytes > config.outputLimitBytes) {
 				text =
@@ -283,6 +295,38 @@ function editThread({ thread, name, archived, locked, tags }) {
 	);
 }
 
+/**
+ * An image attached on Discord, as the model sees it: the url comes from a
+ * read line, Discord hosts only and no redirect
+ * @param {{url: string}} args
+ */
+async function image({ url }) {
+	let u;
+	try {
+		u = new URL(url);
+	} catch {
+		u = null;
+	}
+	if (!u || u.protocol !== 'https:' || !IMAGE_HOSTS.includes(u.hostname)) {
+		throw new Error(`Invalid url "${url}", a Discord attachment url from a read line`);
+	}
+	const res = await fetch(u, { redirect: 'error', signal: AbortSignal.timeout(config.timeoutMs) });
+	if (!res.ok) {
+		throw new Error(`HTTP ${res.status} ${res.statusText}`);
+	}
+	if (Number(res.headers.get('content-length')) > config.imageLimitBytes) {
+		throw new Error(`Image larger than ${config.imageLimitBytes} bytes`);
+	}
+	const bytes = Buffer.from(await res.arrayBuffer());
+	if (bytes.length > config.imageLimitBytes) {
+		throw new Error(`Image larger than ${config.imageLimitBytes} bytes`);
+	}
+	if (!imageType(bytes)) {
+		throw new Error('Not an image, only PNG, JPEG, GIF and WebP are shown');
+	}
+	return imageResults(bytes, IMAGE_LIMITS);
+}
+
 const TOOLS_MAPPING = {
 	discord_user_guilds: tool(guilds),
 	discord_user_unread: tool(unread),
@@ -293,7 +337,8 @@ const TOOLS_MAPPING = {
 	discord_user_post: tool(post),
 	discord_user_edit: tool(edit),
 	discord_user_react: tool(react),
-	discord_user_edit_thread: tool(editThread)
+	discord_user_edit_thread: tool(editThread),
+	discord_user_image: tool(image)
 };
 
 module.exports = {

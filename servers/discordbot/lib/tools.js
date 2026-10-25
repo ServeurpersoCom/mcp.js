@@ -2,7 +2,8 @@
  * Discord bot module
  * Exposes a bot account over the Discord REST API, no gateway
  *
- * - discord_bot_channels, discord_bot_threads, discord_bot_read: read
+ * - discord_bot_channels, discord_bot_threads, discord_bot_read,
+ *   discord_bot_image: read
  * - discord_bot_post, discord_bot_edit, discord_bot_react,
  *   discord_bot_edit_thread: write
  *
@@ -25,6 +26,7 @@
 
 const { snowflake, request } = require('./api');
 const { author, message } = require('./render');
+const { imageType, imageResults } = require('../../../core/image');
 const { textResult } = require('../../../core/tool-result');
 
 const config = require('../config.json').discordbot;
@@ -55,6 +57,12 @@ const NOT_VIEWABLE = [403, 404];
 const ARCHIVED_PAGE = 100;
 const MESSAGES_PAGE = 50;
 const MESSAGES_MAX = 100;
+const IMAGE_HOSTS = ['cdn.discordapp.com', 'media.discordapp.net'];
+const IMAGE_LIMITS = {
+	pixels: config.maxMegapixels * 1000000,
+	side: config.maxDimension,
+	quality: config.jpegQuality
+};
 const DISCORD_EPOCH = 1420070400000n;
 const VIEW_CHANNEL = 1024n;
 const ADMINISTRATOR = 8n;
@@ -66,14 +74,18 @@ const EMOJI_NAME = /^\w+$/;
 
 /**
  * Turn a handler into a tool, a thrown error becoming an error result and the
- * text keeping its head when it exceeds the output limit
- * @param {function(object): Promise<string>} handler
+ * text keeping its head when it exceeds the output limit; results a handler
+ * already made, an image, pass as they are
+ * @param {function(object): Promise<string|object|object[]>} handler
  * @returns {function(object): Promise<object>}
  */
 function tool(handler) {
 	return async (args) => {
 		try {
 			let text = await handler(args);
+			if (typeof text !== 'string') {
+				return text;
+			}
 			const bytes = Buffer.byteLength(text);
 			if (bytes > config.outputLimitBytes) {
 				text =
@@ -538,6 +550,38 @@ async function editThread({ thread, name, archived, locked, tags }) {
 	return `Thread ${updated.id} "${updated.name}" updated`;
 }
 
+/**
+ * An image attached on Discord, as the model sees it: the url comes from a
+ * read line, Discord hosts only and no redirect
+ * @param {{url: string}} args
+ */
+async function image({ url }) {
+	let u;
+	try {
+		u = new URL(url);
+	} catch {
+		u = null;
+	}
+	if (!u || u.protocol !== 'https:' || !IMAGE_HOSTS.includes(u.hostname)) {
+		throw new Error(`Invalid url "${url}", a Discord attachment url from a read line`);
+	}
+	const res = await fetch(u, { redirect: 'error', signal: AbortSignal.timeout(config.timeoutMs) });
+	if (!res.ok) {
+		throw new Error(`HTTP ${res.status} ${res.statusText}`);
+	}
+	if (Number(res.headers.get('content-length')) > config.imageLimitBytes) {
+		throw new Error(`Image larger than ${config.imageLimitBytes} bytes`);
+	}
+	const bytes = Buffer.from(await res.arrayBuffer());
+	if (bytes.length > config.imageLimitBytes) {
+		throw new Error(`Image larger than ${config.imageLimitBytes} bytes`);
+	}
+	if (!imageType(bytes)) {
+		throw new Error('Not an image, only PNG, JPEG, GIF and WebP are shown');
+	}
+	return imageResults(bytes, IMAGE_LIMITS);
+}
+
 const TOOLS_MAPPING = {
 	discord_bot_channels: tool(channels),
 	discord_bot_threads: tool(threads),
@@ -545,7 +589,8 @@ const TOOLS_MAPPING = {
 	discord_bot_post: tool(post),
 	discord_bot_edit: tool(edit),
 	discord_bot_react: tool(react),
-	discord_bot_edit_thread: tool(editThread)
+	discord_bot_edit_thread: tool(editThread),
+	discord_bot_image: tool(image)
 };
 
 module.exports = {

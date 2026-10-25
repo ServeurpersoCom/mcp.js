@@ -30,8 +30,8 @@ const fs = require('fs');
 const path = require('path');
 const config = require('../config.json');
 const { podmanExec, escapeShell } = require('./podman-executor');
-const { imageType, imageFit } = require('./image');
-const { textResult, imageResult } = require('../../../core/tool-result');
+const { imageType, imageResults } = require('../../../core/image');
+const { textResult } = require('../../../core/tool-result');
 
 // Load tools definitions from tools.json once at startup
 const toolsDefinitionPath = path.join(__dirname, '..', 'tools.json');
@@ -373,17 +373,7 @@ async function tool_view(args = {}) {
 	}
 
 	if (imageType(file.data)) {
-		const sent = await imageFit(file.data, IMAGE_LIMITS);
-		if (sent.error) {
-			return textResult(sent.error, true);
-		}
-		const described = (mime, width, height, bytes) => `${mime} ${width}x${height}, ${bytes} bytes`;
-		let line = `Image ${described(sent.sourceMime, sent.sourceWidth, sent.sourceHeight, file.data.length)}`;
-		if (sent.made) {
-			line += `, sent as ${described(sent.mime, sent.width, sent.height, sent.data.length)}`;
-			line += sent.transparent ? ', its transparency laid on white' : '';
-		}
-		return [textResult(line), imageResult(sent.data.toString('base64'), sent.mime)];
+		return imageResults(file.data, IMAGE_LIMITS);
 	}
 
 	if (file.data.subarray(0, BINARY_PROBE_BYTES).includes(0)) {

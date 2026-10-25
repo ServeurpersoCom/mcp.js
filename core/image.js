@@ -10,9 +10,13 @@
  * decodes the image, so an image over the pixel limit is never decoded. The
  * decoding, resizing and encoding run in libvips through sharp, a resize in
  * scRGB, linear light in floating point, so dark gradients keep every level
+ *
+ * imageResults hands a tool the result an image makes: a line saying what was
+ * read and what is sent, then the image block
  */
 
 const sharp = require('sharp');
+const { textResult, imageResult } = require('./tool-result');
 
 /**
  * The MIME type of an image by its first bytes, undefined for anything else
@@ -162,10 +166,10 @@ async function imageFit(bytes, limits) {
 	const uprightH = turned ? w : h;
 	const fits = Math.max(w, h) <= limits.side;
 
-	// a WebP goes as it is, view decoding none
+	// a WebP goes as it is, never decoded
 	if (sourceMime === 'image/webp' && !fits) {
 		return {
-			error: `WebP of ${w}x${h}, longer than ${limits.side} px, and view resizes no WebP`
+			error: `WebP of ${w}x${h}, longer than ${limits.side} px, and no WebP is resized`
 		};
 	}
 	if (sourceMime === 'image/webp' || (sourceMime === 'image/jpeg' && orientation === 1 && fits)) {
@@ -208,4 +212,26 @@ async function imageFit(bytes, limits) {
 	return { ...out, mime: 'image/jpeg', made: true };
 }
 
-module.exports = { imageType, imageFit };
+/**
+ * The tool results of an image: a line with the type, size and weight read,
+ * and those sent when the image was made anew, then the image block; or an
+ * error result
+ * @param {Buffer} bytes
+ * @param {{pixels: number, side: number, quality: number}} limits As imageFit
+ * @returns {Promise<object|object[]>}
+ */
+async function imageResults(bytes, limits) {
+	const sent = await imageFit(bytes, limits);
+	if (sent.error) {
+		return textResult(sent.error, true);
+	}
+	const described = (mime, width, height, size) => `${mime} ${width}x${height}, ${size} bytes`;
+	let line = `Image ${described(sent.sourceMime, sent.sourceWidth, sent.sourceHeight, bytes.length)}`;
+	if (sent.made) {
+		line += `, sent as ${described(sent.mime, sent.width, sent.height, sent.data.length)}`;
+		line += sent.transparent ? ', its transparency laid on white' : '';
+	}
+	return [textResult(line), imageResult(sent.data.toString('base64'), sent.mime)];
+}
+
+module.exports = { imageType, imageResults };
