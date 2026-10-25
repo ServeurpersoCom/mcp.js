@@ -3,9 +3,11 @@
  * Reads what the user's own Discord account sees, through the client the user
  * already runs, over its Chrome DevTools Protocol debugging port
  *
- * - discord_user_guilds: the servers, in the order of the account's guild bar
- * - discord_user_unread: the unread channels, with their unread and mention counts
- * - discord_user_channels: the channels of a guild, under their categories
+ * - discord_user_guilds: the direct messages as @me, then the servers in the
+ *   order of the account's guild bar
+ * - discord_user_unread: the unread conversations, with unread and mention counts
+ * - discord_user_channels: the viewable channels of a guild under their
+ *   categories, or the direct messages for @me
  * - discord_user_threads: the threads of a forum or text channel
  * - discord_user_read: the messages of a channel or thread, oldest first
  *
@@ -13,13 +15,13 @@
  * client read gestures, so nothing is posted, no reaction is added and no
  * channel is marked seen. The account never acts, it only reports what it sees
  *
- * With an ssh block the client runs on another machine and a local forward
- * reaches its loopback debugging port; without one the port is local. The key
- * and the host stay in config.json and never reach the model
+ * With an ssh block the client runs on another machine and each call opens a
+ * forward to its loopback debugging port; without one the port is local. The
+ * key and the host stay in config.json and never reach the model
  */
 
 const { pageTarget, evaluate } = require('./cdp');
-const { Tunnel } = require('./tunnel');
+const { withEndpoint } = require('./tunnel');
 const snippets = require('./snippets');
 const { textResult } = require('../../../core/tool-result');
 
@@ -36,8 +38,7 @@ const SNOWFLAKE = /^\d{17,20}$/;
 const ARCHIVE_STAMP = /^\d{4}-\d{2}-\d{2}T[\d:.+-]+$/;
 const MESSAGES_PAGE = 50;
 const MESSAGES_MAX = 100;
-
-const tunnel = new Tunnel(config);
+const DM_GUILD = '@me';
 
 /**
  * Check a snowflake id, the form every channel and guild id takes
@@ -54,15 +55,17 @@ function snowflake(value, what) {
 }
 
 /**
- * Evaluate one snippet in the client page and return its text
+ * Evaluate one snippet in the client page and return its text, through a
+ * forward opened for this call when the port is remote
  * @param {string} expression
  * @returns {Promise<string>}
  */
-async function run(expression) {
-	const origin = await tunnel.endpoint();
-	const page = await pageTarget(origin, PAGE_URL, config.timeoutMs);
-	const value = await evaluate(page.webSocketDebuggerUrl, expression, config.timeoutMs);
-	return value == null ? '' : String(value);
+function run(expression) {
+	return withEndpoint(config, async (origin) => {
+		const page = await pageTarget(origin, PAGE_URL, config.timeoutMs);
+		const value = await evaluate(page.webSocketDebuggerUrl, expression, config.timeoutMs);
+		return value == null ? '' : String(value);
+	});
 }
 
 /**
@@ -89,25 +92,28 @@ function tool(handler) {
 }
 
 /**
- * The guilds the account is in, in the order of its own guild bar
+ * The direct messages as @me, then the guilds in the order of the guild bar
  */
 function guilds() {
 	return run(snippets.GUILDS);
 }
 
 /**
- * The unread channels across guilds, with unread and mention counts
+ * The unread conversations, direct messages first, with unread and mention
+ * counts
  */
 function unread() {
 	return run(snippets.UNREAD);
 }
 
 /**
- * The channels of a guild, grouped under their category
+ * The viewable channels of a guild under their category, or the direct
+ * messages for @me
  * @param {{guild: string}} args
  */
 function channels({ guild }) {
-	return run(snippets.channels(JSON.stringify(snowflake(guild, 'guild'))));
+	const id = guild === DM_GUILD ? DM_GUILD : snowflake(guild, 'guild');
+	return run(snippets.channels(JSON.stringify(id)));
 }
 
 /**

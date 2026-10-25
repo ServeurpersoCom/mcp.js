@@ -269,14 +269,16 @@ Messages, Create Posts, Send Messages in Threads and Read Message History.
 ### discorduser
 
 A read only view of your own Discord account, through the client you already
-run: `discord_user_guilds` (your servers in guild bar order),
-`discord_user_unread` (the channels with unread messages and their mention
-counts), `discord_user_channels` (a server's channels under their categories),
-`discord_user_threads` (a forum or text channel's threads) and
+run: `discord_user_guilds` (your direct messages as `@me`, then your servers
+in guild bar order), `discord_user_unread` (the conversations with unread
+messages and their mention counts), `discord_user_channels` (the channels of a
+server you may view, under their categories, or your direct messages for
+`@me`), `discord_user_threads` (a forum or text channel's threads) and
 `discord_user_read` (messages, oldest first, `after` for what came since a
 message). These tools only read: nothing is posted, no reaction is added, no
 channel is marked seen, so the account keeps the unread state as you left it.
-Ids in messages are rendered as names, so the output reads aloud or in braille.
+Ids in messages are rendered as names, and stickers, replies, embeds, polls
+and forwarded messages as words, so the output reads aloud or in braille.
 
 Start the client with Chromium's debugging flag, loopback only. On Windows the
 shortcut target becomes `Discord.exe --processStart Discord.exe
@@ -308,15 +310,13 @@ and pinned to that host, so nothing but this server reaches the port:
 		"host": "192.168.0.12",
 		"user": "someone",
 		"key": "/path/to/id_ed25519",
-		"knownHosts": "/path/to/known_hosts",
-		"localPort": 19222,
-		"idleMs": 300000
+		"knownHosts": "/path/to/known_hosts"
 	}
 }
 ```
 
-The forward opens on the first call, stays up between calls and closes after
-`idleMs` idle. The debugging port gives full control of the session to whatever
+Each call opens its own forward on a port the system picks and kills it when
+the call ends, so nothing outlives a call. The debugging port gives full control of the session to whatever
 reaches it, so it is kept on loopback and, across a network, inside the SSH
 tunnel.
 

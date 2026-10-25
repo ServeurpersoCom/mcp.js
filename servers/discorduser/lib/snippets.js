@@ -9,6 +9,9 @@
  * module by its exact get/post/put/patch/del shape, and the renderers that turn
  * ids into the names a reader needs. Only req.get is ever called, so a snippet
  * reads and never writes, reacts or marks anything seen
+ *
+ * What a snippet lists is what the account may view: guild channels pass the
+ * VIEW_CHANNEL permission, and direct messages sit under the pseudo guild @me
  */
 
 const PRELUDE = `
@@ -56,7 +59,18 @@ const __get = async (url, query) => {
 	return res.body;
 };
 
-const CTYPE = { 0: 'text', 2: 'voice', 4: 'category', 5: 'announcement', 10: 'thread', 11: 'thread', 12: 'thread', 13: 'stage', 15: 'forum', 16: 'media' };
+const VIEW_CHANNEL = 1024n;
+const CTYPE = { 0: 'text', 1: 'dm', 2: 'voice', 3: 'group', 4: 'category', 5: 'announcement', 10: 'thread', 11: 'thread', 12: 'thread', 13: 'stage', 15: 'forum', 16: 'media' };
+const SYSTEM = { 1: 'added someone to the group', 2: 'removed someone from the group', 6: 'pinned a message', 7: 'joined the server', 8: 'boosted the server', 9: 'boosted the server', 10: 'boosted the server', 11: 'boosted the server', 12: 'followed a channel here', 18: 'started a thread' };
+const EMBED_TEXT = 500;
+
+const __canView = (c) => {
+	try {
+		return __store('PermissionStore').can(VIEW_CHANNEL, c);
+	} catch {
+		return false;
+	}
+};
 
 const __userName = (id) => {
 	try {
@@ -68,7 +82,7 @@ const __userName = (id) => {
 const __channelName = (id) => {
 	try {
 		const c = __store('ChannelStore').getChannel(id);
-		if (c) return c.name;
+		if (c) return c.name || __dmName(c);
 	} catch {}
 	return null;
 };
@@ -80,13 +94,25 @@ const __roleName = (gid, id) => {
 	return null;
 };
 
+// A direct message has no name of its own: its recipients name it
+const __dmName = (c) => {
+	if (c.name) return c.name;
+	const names = (c.recipients || []).map((id) => __userName(id) || id);
+	return names.join(', ') || c.id;
+};
+
 const __stamp = (iso) => (iso || '').slice(0, 16).replace('T', ' ');
+const __idStamp = (id) => __stamp(new Date(Number((BigInt(id) >> 22n) + 1420070400000n)).toISOString());
+const __author = (u) => (u ? u.global_name || u.username : 'unknown');
+const __clip = (text, n) => (text.length > n ? text.slice(0, n) + '...' : text);
 
 // Mentions, channel links, custom emojis and plain newlines turned into text a
-// reader hears or reads on one line, ids kept when a name is unknown
-const __plain = (content, guildId) => {
+// reader hears or reads on one line. A user mention takes its name from the
+// message itself first, which carries every user it mentions, then from the
+// client cache, the id staying only when both miss
+const __plain = (content, guildId, names) => {
 	let text = content || '';
-	text = text.replace(/<@!?(\\d+)>/g, (_, id) => '@' + (__userName(id) || id));
+	text = text.replace(/<@!?(\\d+)>/g, (_, id) => '@' + (names[id] || __userName(id) || id));
 	text = text.replace(/<@&(\\d+)>/g, (_, id) => '@' + (__roleName(guildId, id) || id));
 	text = text.replace(/<#(\\d+)>/g, (_, id) => '#' + (__channelName(id) || id));
 	text = text.replace(/<a?:(\\w+):\\d+>/g, (_, n) => ':' + n + ':');
@@ -94,19 +120,63 @@ const __plain = (content, guildId) => {
 	return text.trim();
 };
 
-const __message = (m) => {
-	const author = m.author ? m.author.global_name || m.author.username : 'unknown';
-	const parts = [m.id, __stamp(m.timestamp), author + ':'];
-	const body = __plain(m.content, m.guild_id);
-	if (body) parts.push(body);
-	if (m.referenced_message) {
-		const r = m.referenced_message;
-		const ra = r.author ? r.author.global_name || r.author.username : 'unknown';
-		parts.push('| reply to ' + ra);
-	}
+// Files, stickers, embeds and polls of a message or of a forwarded snapshot
+const __extras = (m, guildId, names, content) => {
+	const parts = [];
 	for (const a of m.attachments || []) parts.push('| file ' + a.filename + ' ' + a.size + 'B ' + a.url);
+	for (const s of m.sticker_items || []) parts.push('| sticker ' + s.name);
 	for (const e of m.embeds || []) {
-		if (e.title || e.url) parts.push('| embed ' + [e.title, e.url].filter(Boolean).join(' '));
+		const title = e.title || (e.author && e.author.name) || '';
+		const url = e.url && !(content || '').includes(e.url) ? e.url : '';
+		const text = !content && e.description ? __clip(__plain(e.description, guildId, names), EMBED_TEXT) : '';
+		const embed = [title, url, text].filter(Boolean).join(' ');
+		if (embed) parts.push('| embed ' + embed);
+	}
+	if (m.poll) {
+		const answers = (m.poll.answers || []).map((a) => a.poll_media && a.poll_media.text).filter(Boolean);
+		parts.push('| poll ' + ((m.poll.question && m.poll.question.text) || '') + ': ' + answers.join(' / '));
+	}
+	return parts;
+};
+
+// The author a reply answers: the API joins the answered message only now and
+// then, so the page being read and the client cache stand in, and the answered
+// id is given when none of them has it
+const __replyTo = (m, page) => {
+	const ref = m.message_reference && m.message_reference.message_id;
+	if (!ref) return null;
+	if (m.referenced_message) return __author(m.referenced_message.author);
+	if (page[ref]) return __author(page[ref].author);
+	try {
+		const cached = __store('MessageStore').getMessage(m.channel_id, ref);
+		if (cached && cached.author) return cached.author.globalName || cached.author.username;
+	} catch {}
+	return 'message ' + ref;
+};
+
+const __message = (m, page) => {
+	const names = {};
+	for (const u of m.mentions || []) names[u.id] = __author(u);
+	const author = __author(m.author);
+	const parts = [m.id, __stamp(m.timestamp)];
+
+	if (SYSTEM[m.type]) {
+		parts.push('* ' + author + ' ' + SYSTEM[m.type]);
+		if (m.content) parts.push(__plain(m.content, m.guild_id, names));
+		return parts.join(' ');
+	}
+
+	parts.push(author + ':');
+	const body = __plain(m.content, m.guild_id, names);
+	if (body) parts.push(body);
+	const to = m.type === 19 ? __replyTo(m, page) : null;
+	if (to) parts.push('| reply to ' + to);
+	parts.push(...__extras(m, m.guild_id, names, m.content));
+	for (const snap of m.message_snapshots || []) {
+		const f = snap.message || {};
+		const fwd = __plain(f.content, m.guild_id, names);
+		parts.push('| forwarded' + (fwd ? ': ' + fwd : ''));
+		parts.push(...__extras(f, m.guild_id, names, f.content));
 	}
 	for (const r of m.reactions || []) {
 		const name = r.emoji && (r.emoji.name || r.emoji.id);
@@ -126,33 +196,38 @@ function expr(body) {
 }
 
 /**
- * The guilds the account is in, in the order of its own guild bar
+ * The direct messages, then the guilds in the order of the account's guild bar
  */
 const GUILDS = expr(`
 	const G = __store('GuildStore');
-	const order = __store('SortedGuildStore').getFlattenedGuildIds();
-	const lines = order.map((id) => {
+	const dms = __store('ChannelStore').getSortedPrivateChannels();
+	const lines = ['@me Direct messages (' + dms.length + ')'];
+	for (const id of __store('SortedGuildStore').getFlattenedGuildIds()) {
 		const g = G.getGuild(id);
-		return g ? g.id + ' ' + g.name : null;
-	}).filter(Boolean);
-	return lines.join('\\n') || 'No guild';
+		if (g) lines.push(g.id + ' ' + g.name);
+	}
+	return lines.join('\\n');
 `);
 
 /**
- * The channels of a guild, grouped under their category, with ids and types
- * @param {string} guild Guild id, JSON encoded by the caller
+ * The channels of a guild the account may view, grouped under their category,
+ * or the direct messages, latest conversation first, for @me
+ * @param {string} guild Guild id or @me, JSON encoded by the caller
  */
 function channels(guild) {
 	return expr(`
 	const gid = ${guild};
+	const CH = __store('ChannelStore');
+	if (gid === '@me') {
+		const lines = CH.getSortedPrivateChannels().map((c) => c.id + ' ' + (CTYPE[c.type] || c.type) + ' ' + __dmName(c));
+		return 'Direct messages\\n' + (lines.join('\\n') || 'No conversation');
+	}
 	const g = __store('GuildStore').getGuild(gid);
 	if (!g) throw new Error('Guild ' + gid + ' not found, the account is not in it');
-	const byId = {};
-	for (const c of __store('ChannelStore').getMutableGuildChannelsForGuild(gid) ? Object.values(__store('ChannelStore').getMutableGuildChannelsForGuild(gid)) : []) byId[c.id] = c;
-	const all = Object.values(byId);
+	const byId = CH.getMutableGuildChannelsForGuild(gid) || {};
 	const rank = (c) => { const p = byId[c.parent_id]; return p ? [p.position, c.position] : [-1, c.position]; };
-	const lines = all
-		.filter((c) => c.type !== 4)
+	const lines = Object.values(byId)
+		.filter((c) => c.type !== 4 && __canView(c))
 		.sort((a, b) => { const [pa, ca] = rank(a); const [pb, cb] = rank(b); return pa - pb || ca - cb; })
 		.map((c) => {
 			const p = byId[c.parent_id];
@@ -164,29 +239,35 @@ function channels(guild) {
 }
 
 /**
- * The unread channels across guilds, with unread and mention counts
+ * The unread conversations and viewable channels, with unread and mention
+ * counts, direct messages first
  */
 const UNREAD = expr(`
 	const RS = __store('ReadStateStore');
 	const CH = __store('ChannelStore');
 	const GC = __store('GuildChannelStore');
 	const G = __store('GuildStore');
-	const order = __store('SortedGuildStore').getFlattenedGuildIds();
+	const line = (id, label) => {
+		if (!RS.hasUnread(id)) return null;
+		const count = RS.getUnreadCount(id);
+		const mentions = RS.getMentionCount(id);
+		if (!count && !mentions) return null;
+		return '  ' + id + ' ' + label + ' | ' + count + ' unread' + (mentions ? ' | ' + mentions + ' mentions' : '');
+	};
 	const blocks = [];
-	for (const gid of order) {
+	const dms = CH.getSortedPrivateChannels().map((c) => line(c.id, __dmName(c))).filter(Boolean);
+	if (dms.length) blocks.push('@me Direct messages\\n' + dms.join('\\n'));
+	for (const gid of __store('SortedGuildStore').getFlattenedGuildIds()) {
 		const g = G.getGuild(gid);
 		if (!g) continue;
-		const ids = GC.getSelectableChannelIds ? GC.getSelectableChannelIds(gid) : [];
 		const lines = [];
-		for (const id of ids) {
-			if (!RS.hasUnread(id)) continue;
-			const count = RS.getUnreadCount(id);
-			const mentions = RS.getMentionCount(id);
-			if (!count && !mentions) continue;
+		for (const id of GC.getSelectableChannelIds(gid)) {
 			const c = CH.getChannel(id);
-			lines.push('  ' + id + ' #' + (c ? c.name : id) + ' | ' + count + ' unread' + (mentions ? ' | ' + mentions + ' mentions' : ''));
+			if (!c || !__canView(c)) continue;
+			const l = line(id, '#' + c.name);
+			if (l) lines.push(l);
 		}
-		if (lines.length) blocks.push(g.name + '\\n' + lines.join('\\n'));
+		if (lines.length) blocks.push(g.id + ' ' + g.name + '\\n' + lines.join('\\n'));
 	}
 	return blocks.join('\\n') || 'Nothing unread';
 `);
@@ -201,21 +282,26 @@ function threads(channel, before) {
 	const cid = ${channel};
 	const before = ${before};
 	const ch = __store('ChannelStore').getChannel(cid);
-	if (!ch) throw new Error('Channel ' + cid + ' not found');
+	if (!ch || !__canView(ch)) throw new Error('Channel ' + cid + ' not found or not viewable');
 	const tagName = {};
 	for (const t of ch.availableTags || []) tagName[t.id] = t.name;
 	const line = (t, archived) => {
-		const applied = (t.appliedTags || []).map((id) => tagName[id] || id);
-		return t.id + ' ' + t.name + ' | ' + __stamp(new Date(Number((BigInt(t.id) >> 22n) + 1420070400000n)).toISOString()) + (applied.length ? ' | tags ' + applied.join(' ') : '') + (archived ? ' | archived' : '');
+		const applied = (t.appliedTags || t.applied_tags || []).map((id) => tagName[id] || id);
+		const count = t.messageCount != null ? t.messageCount : t.message_count;
+		return t.id + ' ' + t.name + ' | ' + __idStamp(t.id) + (count != null ? ' | ' + count + ' msgs' : '') + (applied.length ? ' | tags ' + applied.join(' ') : '') + (archived ? ' | archived' : '');
 	};
 	const lines = [];
 	if (before == null) {
-		const active = __store('ActiveThreadsStore').getThreadsForParent ? __store('ActiveThreadsStore').getThreadsForParent(cid) : [];
-		for (const t of (Array.isArray(active) ? active : Object.values(active || {}))) lines.push(line(t, false));
+		const active = __store('ActiveThreadsStore').getThreadsForParent(ch.guild_id, cid) || {};
+		const CH = __store('ChannelStore');
+		for (const id of Object.keys(active).sort((a, b) => (BigInt(b) > BigInt(a) ? 1 : -1))) {
+			const t = CH.getChannel(id) || active[id];
+			if (t) lines.push(line(t, false));
+		}
 	}
 	const page = await __get('/channels/' + cid + '/threads/archived/public', { limit: 100, before: before == null ? undefined : before });
-	for (const t of page.threads || []) lines.push(line(t, true));
-	if (page.has_more && page.threads && page.threads.length) {
+	for (const t of (page && page.threads) || []) lines.push(line(t, true));
+	if (page && page.has_more && page.threads.length) {
 		lines.push('more: before=' + page.threads[page.threads.length - 1].thread_metadata.archive_timestamp);
 	}
 	return lines.join('\\n') || 'No thread in this channel';
@@ -234,13 +320,17 @@ function read(channel, after, before, limit) {
 	const cid = ${channel};
 	const after = ${after};
 	const before = ${before};
+	const ch = __store('ChannelStore').getChannel(cid);
+	if (ch && ch.guild_id && !__canView(ch)) throw new Error('Channel ' + cid + ' is not viewable');
 	const query = { limit: ${limit} };
 	if (after != null) query.after = after;
 	else if (before != null) query.before = before;
 	const messages = await __get('/channels/' + cid + '/messages', query);
 	if (!Array.isArray(messages)) throw new Error('Channel ' + cid + ' returned no messages, is it readable');
 	const ordered = messages.slice().reverse();
-	const lines = ordered.map(__message);
+	const page = {};
+	for (const m of messages) page[m.id] = m;
+	const lines = ordered.map((m) => __message(m, page));
 	if (messages.length === ${limit}) {
 		lines.push(after != null ? 'more: after=' + ordered[ordered.length - 1].id : 'more: before=' + ordered[0].id);
 	}
