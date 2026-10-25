@@ -282,7 +282,9 @@ async function post({ channel: id, content, reply_to, thread_name, tags }) {
 	const ids = Object.fromEntries((ch.available_tags || []).map((tag) => [tag.name, tag.id]));
 	const applied = (tags || []).map((name) => {
 		if (!ids[name]) {
-			throw new Error(`Unknown tag "${name}" in #${ch.name}, tags: ${Object.keys(ids).join(' ') || 'none'}`);
+			throw new Error(
+				`Unknown tag "${name}" in #${ch.name}, tags: ${Object.keys(ids).join(' ') || 'none'}`
+			);
 		}
 		return ids[name];
 	});
