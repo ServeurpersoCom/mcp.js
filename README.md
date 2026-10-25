@@ -2,8 +2,8 @@
 
 The Model Context Protocol server I run every day, published as it is. It
 serves a Podman sandbox, a persistent memory, a read only mailbox, an agent
-account on Moltbook, a Discord bot and a 1fichier account to any MCP
-client, behind one
+account on Moltbook, a Discord bot, a read only view of your own Discord
+account and a 1fichier account to any MCP client, behind one
 endpoint. Built on the
 official TypeScript SDK v2
 ([@modelcontextprotocol/server](https://github.com/modelcontextprotocol/typescript-sdk)),
@@ -15,8 +15,8 @@ same endpoint, each client getting the newest revision it knows.
 - Anthropic Claude (web, custom MCP server)
 - any OpenAI compatible chat UI without an MCP client, through the bridge
 
-Four servers, the two transports of the specification (stdio, Streamable
-HTTP), every server aggregated behind one endpoint, zero framework.
+Every server aggregated behind one endpoint, the two transports of the
+specification (stdio, Streamable HTTP), zero framework.
 
 ## Rootless Podman
 
@@ -45,6 +45,7 @@ servers/memory/     a persistent memory in plain files
 servers/email/      a read only mailbox over IMAPS
 servers/moltbook/   an agent account on Moltbook
 servers/discord/    a Discord bot over the REST API
+servers/discorduser/ a read only view of your own Discord account, over its debug port
 servers/onefichier/ a 1fichier account
 mcp-bridge/         an OpenAI compatible proxy that runs the tools for MCP-less UIs
 main.js             binds every server to one transport
@@ -264,6 +265,60 @@ reaches the model.
 Create the bot in the Discord Developer Portal, enable its Message Content
 intent so `discord_read` sees the text, and invite it with View Channel, Send
 Messages, Create Posts, Send Messages in Threads and Read Message History.
+
+### discorduser
+
+A read only view of your own Discord account, through the client you already
+run: `discord_user_guilds` (your servers in guild bar order),
+`discord_user_unread` (the channels with unread messages and their mention
+counts), `discord_user_channels` (a server's channels under their categories),
+`discord_user_threads` (a forum or text channel's threads) and
+`discord_user_read` (messages, oldest first, `after` for what came since a
+message). These tools only read: nothing is posted, no reaction is added, no
+channel is marked seen, so the account keeps the unread state as you left it.
+Ids in messages are rendered as names, so the output reads aloud or in braille.
+
+Start the client with Chromium's debugging flag, loopback only. On Windows the
+shortcut target becomes `Discord.exe --processStart Discord.exe
+--process-start-args "--remote-debugging-port=9222"`, on macOS `open -a Discord
+--args --remote-debugging-port=9222`, on Linux `discord
+--remote-debugging-port=9222`. When the client runs on the same machine as this
+server, that is the whole setup:
+
+```json
+{
+	"cdp": {
+		"host": "127.0.0.1",
+		"port": 9222
+	}
+}
+```
+
+When the client runs on another machine, the debugging port stays on its
+loopback and an `ssh` block carries a local forward to it, authenticated by key
+and pinned to that host, so nothing but this server reaches the port:
+
+```json
+{
+	"cdp": {
+		"host": "127.0.0.1",
+		"port": 9222
+	},
+	"ssh": {
+		"host": "192.168.0.12",
+		"user": "someone",
+		"key": "/path/to/id_ed25519",
+		"knownHosts": "/path/to/known_hosts",
+		"localPort": 19222,
+		"idleMs": 300000
+	}
+}
+```
+
+The forward opens on the first call, stays up between calls and closes after
+`idleMs` idle. The debugging port gives full control of the session to whatever
+reaches it, so it is kept on loopback and, across a network, inside the SSH
+tunnel.
 
 ### onefichier
 
