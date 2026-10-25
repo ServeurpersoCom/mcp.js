@@ -102,7 +102,7 @@
 		"type": "function",
 		"function": {
 			"name": "discord_bot_post",
-			"description": "Post in a channel or thread, as a reply with reply_to, or open a thread when the channel is a forum, thread_name then required. Nothing posted pings anyone. Only when the user asks.",
+			"description": "Post in a channel or thread, as a reply with reply_to, or open a thread when the channel is a forum, thread_name then required. Mentions ping as when the bot types them, everyone and roles as its role allows. Only when the user asks.",
 			"parameters": {
 				"properties": {
 					"channel": {

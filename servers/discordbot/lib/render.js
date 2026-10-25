@@ -43,6 +43,15 @@ function author(u) {
 }
 
 /**
+ * The name of who wrote a message, a bot or a webhook marked as such
+ * @param {object} u
+ * @returns {string}
+ */
+function speaker(u) {
+	return author(u) + (u && u.bot ? ' [bot]' : '');
+}
+
+/**
  * @param {string} text
  * @param {number} n
  * @returns {string}
@@ -110,10 +119,10 @@ function extras(m, names, content) {
 function replyTo(m, page) {
 	const ref = m.message_reference && m.message_reference.message_id;
 	if (m.referenced_message) {
-		return author(m.referenced_message.author);
+		return speaker(m.referenced_message.author);
 	}
 	if (page[ref]) {
-		return author(page[ref].author);
+		return speaker(page[ref].author);
 	}
 	return `message ${ref}`;
 }
@@ -130,14 +139,14 @@ function message(m, page, tables) {
 	const parts = [m.id, stamp(m.timestamp)];
 
 	if (SYSTEM[m.type]) {
-		parts.push(`* ${author(m.author)} ${SYSTEM[m.type]}`);
+		parts.push(`* ${speaker(m.author)} ${SYSTEM[m.type]}`);
 		if (m.content) {
 			parts.push(plain(m.content, names));
 		}
 		return parts.join(' ');
 	}
 
-	parts.push(`${author(m.author)}:`);
+	parts.push(`${speaker(m.author)}:`);
 	const body = plain(m.content, names);
 	if (body) {
 		parts.push(body);

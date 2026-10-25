@@ -257,9 +257,9 @@ pages of a forum or text channel), `discord_bot_read` (messages, oldest first,
 `discord_bot_edit` (a message of the bot), `discord_bot_react` (a reaction,
 added or taken back) and `discord_bot_edit_thread` (rename, archive, lock or
 retag a thread). What the bot sees and writes is what its role is allowed in
-the guild settings, channel by channel. Nothing posted pings anyone, and no
-tool deletes a message. Messages read as in `discorduser`. The token stays in
-`config.json` and never reaches the model.
+the guild settings, channel by channel. Mentions ping, everyone and roles as
+its role allows, and no tool deletes a message. Messages read as in
+`discorduser`. The token stays in `config.json` and never reaches the model.
 
 ```json
 {

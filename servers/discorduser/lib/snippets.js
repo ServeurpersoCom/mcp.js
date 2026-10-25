@@ -170,6 +170,8 @@ const __dmName = (c) => {
 const __stamp = (iso) => (iso || '').slice(0, 16).replace('T', ' ');
 const __idStamp = (id) => __stamp(new Date(Number((BigInt(id) >> 22n) + 1420070400000n)).toISOString());
 const __author = (u) => (u ? u.global_name || u.username : 'unknown');
+// The name of who wrote a message, a bot or a webhook marked as such
+const __speaker = (u) => __author(u) + (u && u.bot ? ' [bot]' : '');
 const __clip = (text, n) => (text.length > n ? text.slice(0, n) + '...' : text);
 
 // Mentions, channel links, custom emojis and plain newlines turned into text a
@@ -211,11 +213,11 @@ const __extras = (m, guildId, names, content) => {
 const __replyTo = (m, page) => {
 	const ref = m.message_reference && m.message_reference.message_id;
 	if (!ref) return null;
-	if (m.referenced_message) return __author(m.referenced_message.author);
-	if (page[ref]) return __author(page[ref].author);
+	if (m.referenced_message) return __speaker(m.referenced_message.author);
+	if (page[ref]) return __speaker(page[ref].author);
 	try {
 		const cached = __store('MessageStore').getMessage(m.channel_id, ref);
-		if (cached && cached.author) return cached.author.globalName || cached.author.username;
+		if (cached && cached.author) return (cached.author.globalName || cached.author.username) + (cached.author.bot ? ' [bot]' : '');
 	} catch {}
 	return 'message ' + ref;
 };
@@ -224,7 +226,7 @@ const __replyTo = (m, page) => {
 const __message = (m, page, guildId) => {
 	const names = {};
 	for (const u of m.mentions || []) names[u.id] = __author(u);
-	const author = __author(m.author);
+	const author = __speaker(m.author);
 	const parts = [m.id, __stamp(m.timestamp)];
 
 	if (SYSTEM[m.type]) {
@@ -523,9 +525,16 @@ function search(guild, query, page) {
 	if (!res.messages) throw new Error('The search index of this server is not ready, retry in ' + (res.retry_after || 1) + ' s');
 	const offset = query.offset || 0;
 	const lines = [res.total_results + ' results'];
+	const labels = {};
 	for (const [m] of res.messages) {
-		const c = __store('ChannelStore').getChannel(m.channel_id);
-		lines.push(__message(m, {}, gid === '@me' ? null : gid) + ' | in ' + (c ? __label(c) : m.channel_id));
+		if (!(m.channel_id in labels)) {
+			try {
+				labels[m.channel_id] = __label(await __channel(m.channel_id));
+			} catch {
+				labels[m.channel_id] = m.channel_id;
+			}
+		}
+		lines.push(__message(m, {}, gid === '@me' ? null : gid) + ' | in ' + labels[m.channel_id]);
 	}
 	if (offset + ${page} < res.total_results && res.messages.length) lines.push('more: offset=' + (offset + ${page}));
 	return lines.join('\\n');

@@ -11,10 +11,10 @@
  * set per channel in the guild settings; discord_bot_channels lists only the
  * channels those permissions let it view
  *
- * The bot token stays in config.json and never reaches the model. Every write
- * goes out with allowed_mentions empty, so nothing written pings a member, a
- * role or everyone. No tool deletes a message, a reaction of the bot is the
- * only thing it takes back
+ * The bot token stays in config.json and never reaches the model. What the
+ * bot writes pings the mentions in it as its role allows, everyone and roles
+ * included only with the Mention Everyone permission. No tool deletes a
+ * message, a reaction of the bot is the only thing it takes back
  *
  * A forum post opens a thread. Messages render as in discorduser, one line
  * each with names for ids, replies, files, stickers, embeds, polls, forwarded
@@ -52,7 +52,6 @@ const TYPES = {
 const FORUM_TYPES = [15, 16];
 const THREAD_TYPES = [10, 11, 12];
 const THREAD_HOLDERS = [0, 5, 15, 16];
-const NO_MENTIONS = { parse: [] };
 const NOT_VIEWABLE = [403, 404];
 const ARCHIVED_PAGE = 100;
 const MESSAGES_PAGE = 50;
@@ -475,7 +474,7 @@ async function post({ channel: id, content, reply_to, thread_name, tags }) {
 		if (thread_name != null || tags != null) {
 			throw new Error(`Thread_name and tags only apply to a forum, #${ch.name} is not one`);
 		}
-		const body = { content, allowed_mentions: NO_MENTIONS };
+		const body = { content };
 		if (reply_to != null) {
 			body.message_reference = { message_id: snowflake(reply_to, 'reply_to') };
 		}
@@ -494,7 +493,7 @@ async function post({ channel: id, content, reply_to, thread_name, tags }) {
 		body: {
 			name: thread_name,
 			applied_tags: applied,
-			message: { content, allowed_mentions: NO_MENTIONS }
+			message: { content }
 		}
 	});
 	return `Thread ${t.id} "${t.name}" created in #${ch.name}`;
@@ -510,7 +509,7 @@ async function edit({ channel: id, message_id, content }) {
 		'PATCH',
 		`/channels/${ch.id}/messages/${snowflake(message_id, 'message_id')}`,
 		{
-			body: { content, allowed_mentions: NO_MENTIONS }
+			body: { content }
 		}
 	);
 	return `Message ${m.id} edited in #${ch.name}`;
