@@ -3,7 +3,8 @@
  * One line per message, in the words of the discorduser page renderer: user
  * and role mentions, channel links and custom emojis become names, newlines
  * become " / ", and replies, files, stickers, embeds, polls, forwarded messages
- * and reactions become words, so the output reads aloud or in braille
+ * and reactions become words, so the output reads aloud or in braille. A
+ * reaction the reading account gave is marked mine
  *
  * Names come from the tables of the page the caller passes, the id staying
  * when a name is missing
@@ -43,12 +44,12 @@ function author(u) {
 }
 
 /**
- * The name of who wrote a message, a bot or a webhook marked as such
+ * The name of who wrote a message, an app, bot or webhook, marked as Discord badges it
  * @param {object} u
  * @returns {string}
  */
 function speaker(u) {
-	return author(u) + (u && u.bot ? ' [bot]' : '');
+	return author(u) + (u && u.bot ? ' [APP]' : '');
 }
 
 /**
@@ -164,7 +165,7 @@ function message(m, page, tables) {
 	for (const r of m.reactions || []) {
 		const name = r.emoji && (r.emoji.name || r.emoji.id);
 		if (name) {
-			parts.push(`| react ${name} x${r.count}`);
+			parts.push(`| react ${name} x${r.count}` + (r.me ? ' mine' : ''));
 		}
 	}
 	return parts.join(' ');

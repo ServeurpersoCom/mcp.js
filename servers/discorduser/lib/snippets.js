@@ -170,8 +170,8 @@ const __dmName = (c) => {
 const __stamp = (iso) => (iso || '').slice(0, 16).replace('T', ' ');
 const __idStamp = (id) => __stamp(new Date(Number((BigInt(id) >> 22n) + 1420070400000n)).toISOString());
 const __author = (u) => (u ? u.global_name || u.username : 'unknown');
-// The name of who wrote a message, a bot or a webhook marked as such
-const __speaker = (u) => __author(u) + (u && u.bot ? ' [bot]' : '');
+// The name of who wrote a message, an app, bot or webhook, marked as Discord badges it
+const __speaker = (u) => __author(u) + (u && u.bot ? ' [APP]' : '');
 const __clip = (text, n) => (text.length > n ? text.slice(0, n) + '...' : text);
 
 // Mentions, channel links, custom emojis and plain newlines turned into text a
@@ -217,7 +217,7 @@ const __replyTo = (m, page) => {
 	if (page[ref]) return __speaker(page[ref].author);
 	try {
 		const cached = __store('MessageStore').getMessage(m.channel_id, ref);
-		if (cached && cached.author) return (cached.author.globalName || cached.author.username) + (cached.author.bot ? ' [bot]' : '');
+		if (cached && cached.author) return (cached.author.globalName || cached.author.username) + (cached.author.bot ? ' [APP]' : '');
 	} catch {}
 	return 'message ' + ref;
 };
@@ -249,7 +249,7 @@ const __message = (m, page, guildId) => {
 	}
 	for (const r of m.reactions || []) {
 		const name = r.emoji && (r.emoji.name || r.emoji.id);
-		if (name) parts.push('| react ' + name + ' x' + r.count);
+		if (name) parts.push('| react ' + name + ' x' + r.count + (r.me ? ' mine' : ''));
 	}
 	return parts.join(' ');
 };

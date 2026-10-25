@@ -291,7 +291,8 @@ through the model is you reading: `discord_user_read` acks the newest message
 it shows, as opening the channel does, and an older page never moves the read
 state back. What it posts is you writing, mentions included. Ids in messages
 are rendered as names, and stickers, replies, embeds, polls, forwarded messages
-and reactions as words, so the output reads aloud or in braille.
+and reactions as words, yours marked mine, so the output reads aloud or in
+braille.
 
 Start the client with Chromium's debugging flag, loopback only. On Windows the
 shortcut target becomes `Discord.exe --processStart Discord.exe
