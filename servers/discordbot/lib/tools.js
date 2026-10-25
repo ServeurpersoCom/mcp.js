@@ -3,7 +3,8 @@
  * Exposes a bot account over the Discord REST API, no gateway
  *
  * - discord_bot_channels, discord_bot_threads, discord_bot_read: read
- * - discord_bot_post, discord_bot_edit: write
+ * - discord_bot_post, discord_bot_edit, discord_bot_react,
+ *   discord_bot_edit_thread: write
  *
  * What the bot may see and write is the permissions Discord grants its role,
  * set per channel in the guild settings; discord_bot_channels lists only the
@@ -11,7 +12,8 @@
  *
  * The bot token stays in config.json and never reaches the model. Every write
  * goes out with allowed_mentions empty, so nothing written pings a member, a
- * role or everyone. No tool deletes anything
+ * role or everyone. No tool deletes a message, a reaction of the bot is the
+ * only thing it takes back
  *
  * A forum post opens a thread. Messages render as in discorduser, one line
  * each with names for ids, replies, files, stickers, embeds, polls, forwarded
@@ -46,6 +48,7 @@ const TYPES = {
 	16: 'media'
 };
 const FORUM_TYPES = [15, 16];
+const THREAD_TYPES = [10, 11, 12];
 const THREAD_HOLDERS = [0, 5, 15, 16];
 const NO_MENTIONS = { parse: [] };
 const NOT_VIEWABLE = [403, 404];
@@ -58,6 +61,8 @@ const ADMINISTRATOR = 8n;
 const USER_MENTION = /<@!?(\d+)>/g;
 const ROLE_MENTION = /<@&\d+>/;
 const CHANNEL_LINK = /<#\d+>/;
+const CUSTOM_EMOJI = /^\w+:\d{17,20}$/;
+const EMOJI_NAME = /^\w+$/;
 
 /**
  * Turn a handler into a tool, a thrown error becoming an error result and the
@@ -124,6 +129,67 @@ async function channel(id) {
 		}
 		throw error;
 	}
+}
+
+/**
+ * Check an optional boolean argument
+ * @param {*} value
+ * @param {string} what Argument name for the error
+ * @returns {boolean|undefined}
+ */
+function flag(value, what) {
+	if (value != null && typeof value !== 'boolean') {
+		throw new Error(`${what} argument is not a boolean`);
+	}
+	return value == null ? undefined : value;
+}
+
+/**
+ * Check an optional list of tag names
+ * @param {*} tags
+ */
+function tagList(tags) {
+	if (tags != null && (!Array.isArray(tags) || tags.some((t) => typeof t !== 'string'))) {
+		throw new Error('Tags argument is not a list of names');
+	}
+}
+
+/**
+ * Tag ids of a forum for a list of tag names
+ * @param {object} forum
+ * @param {string[]} names
+ * @returns {string[]}
+ */
+function tagIds(forum, names) {
+	const ids = Object.fromEntries((forum.available_tags || []).map((tag) => [tag.name, tag.id]));
+	return names.map((name) => {
+		if (!ids[name]) {
+			throw new Error(
+				`Unknown tag "${name}" in #${forum.name}, tags: ${Object.keys(ids).join(' ') || 'none'}`
+			);
+		}
+		return ids[name];
+	});
+}
+
+/**
+ * Path segment of a reaction emoji: a unicode emoji as is, a custom one as
+ * name:id, or by its bare name, colons allowed, among the emojis of the guild
+ * @param {string} emoji
+ * @param {string} [gid]
+ * @returns {Promise<string>}
+ */
+async function emojiSegment(emoji, gid) {
+	const text = emoji.replace(/^:(.+):$/, '$1');
+	if (CUSTOM_EMOJI.test(text) || !EMOJI_NAME.test(text)) {
+		return encodeURIComponent(text);
+	}
+	const list = gid ? await call('GET', `/guilds/${gid}/emojis`) : [];
+	const found = list.find((e) => e.name === text);
+	if (!found) {
+		throw new Error(`Unknown emoji "${emoji}", a unicode emoji or a custom one of this server`);
+	}
+	return encodeURIComponent(`${found.name}:${found.id}`);
 }
 
 /**
@@ -353,29 +419,34 @@ async function pageNames(gid, messages) {
 }
 
 /**
- * One page of messages of a channel or thread, oldest first, the newest page
- * by default
- * @param {{channel: string, after?: string, before?: string, limit?: number}} args
+ * One page of messages of a channel or thread, oldest first: the newest page
+ * by default, the page after a message, around it or before it
+ * @param {{channel: string, after?: string, around?: string, before?: string, limit?: number}} args
  */
-async function read({ channel: id, after, before, limit = MESSAGES_PAGE }) {
+async function read({ channel: id, after, around, before, limit = MESSAGES_PAGE }) {
 	const ch = await channel(id);
 	const from = after == null ? null : snowflake(after, 'after');
+	const mid = around == null ? null : snowflake(around, 'around');
 	const to = before == null ? null : snowflake(before, 'before');
 	const count = Math.min(Math.max(Math.trunc(Number(limit)) || MESSAGES_PAGE, 1), MESSAGES_MAX);
 	const messages = await call('GET', `/channels/${ch.id}/messages`, {
-		query: { limit: count, after: from, before: from == null ? to : null }
+		query: {
+			limit: count,
+			after: from,
+			around: from == null ? mid : null,
+			before: from == null && mid == null ? to : null
+		}
 	});
 
 	const page = Object.fromEntries(messages.map((m) => [m.id, m]));
 	const names = await pageNames(ch.guild_id, messages);
 	const ordered = messages.slice().reverse();
 	const lines = ordered.map((m) => message(m, page, names));
-	if (messages.length === count) {
-		lines.push(
-			from != null
-				? `more: after=${ordered[ordered.length - 1].id}`
-				: `more: before=${ordered[0].id}`
-		);
+	if (messages.length === count && from == null) {
+		lines.push(`more: before=${ordered[0].id}`);
+	}
+	if (messages.length === count && (from != null || mid != null)) {
+		lines.push(`more: after=${ordered[ordered.length - 1].id}`);
 	}
 	return lines.join('\n') || `No message in #${ch.name}`;
 }
@@ -385,9 +456,7 @@ async function read({ channel: id, after, before, limit = MESSAGES_PAGE }) {
  * @param {{channel: string, content: string, reply_to?: string, thread_name?: string, tags?: string[]}} args
  */
 async function post({ channel: id, content, reply_to, thread_name, tags }) {
-	if (tags != null && (!Array.isArray(tags) || tags.some((t) => typeof t !== 'string'))) {
-		throw new Error('Tags argument is not a list of names');
-	}
+	tagList(tags);
 	const ch = await channel(id);
 
 	if (!FORUM_TYPES.includes(ch.type)) {
@@ -408,16 +477,7 @@ async function post({ channel: id, content, reply_to, thread_name, tags }) {
 	if (reply_to != null) {
 		throw new Error('Reply_to does not apply to a forum, it opens a thread');
 	}
-	const ids = Object.fromEntries((ch.available_tags || []).map((tag) => [tag.name, tag.id]));
-	const applied = (tags || []).map((name) => {
-		if (!ids[name]) {
-			throw new Error(
-				`Unknown tag "${name}" in #${ch.name}, tags: ${Object.keys(ids).join(' ') || 'none'}`
-			);
-		}
-		return ids[name];
-	});
-
+	const applied = tagIds(ch, tags || []);
 	const t = await call('POST', `/channels/${ch.id}/threads`, {
 		body: {
 			name: thread_name,
@@ -444,12 +504,48 @@ async function edit({ channel: id, message_id, content }) {
 	return `Message ${m.id} edited in #${ch.name}`;
 }
 
+/**
+ * Add a reaction of the bot to a message, or take it back with remove
+ * @param {{channel: string, message_id: string, emoji: string, remove?: boolean}} args
+ */
+async function react({ channel: id, message_id, emoji, remove }) {
+	const off = flag(remove, 'Remove');
+	const ch = await channel(id);
+	const mid = snowflake(message_id, 'message_id');
+	const segment = await emojiSegment(emoji, ch.guild_id);
+	await call(off ? 'DELETE' : 'PUT', `/channels/${ch.id}/messages/${mid}/reactions/${segment}/@me`);
+	return `Reaction ${emoji} ${off ? 'removed from' : 'added to'} message ${mid} in #${ch.name}`;
+}
+
+/**
+ * Rename, archive, lock or retag a thread
+ * @param {{thread: string, name?: string, archived?: boolean, locked?: boolean, tags?: string[]}} args
+ */
+async function editThread({ thread, name, archived, locked, tags }) {
+	const body = { name, archived: flag(archived, 'Archived'), locked: flag(locked, 'Locked') };
+	tagList(tags);
+	const t = await channel(thread);
+	if (!THREAD_TYPES.includes(t.type)) {
+		throw new Error(`#${t.name} is not a thread`);
+	}
+	if (tags != null) {
+		body.applied_tags = tagIds(await channel(t.parent_id), tags);
+	}
+	if (Object.values(body).every((v) => v === undefined)) {
+		throw new Error('Nothing to change, give name, archived, locked or tags');
+	}
+	const updated = await call('PATCH', `/channels/${t.id}`, { body });
+	return `Thread ${updated.id} "${updated.name}" updated`;
+}
+
 const TOOLS_MAPPING = {
 	discord_bot_channels: tool(channels),
 	discord_bot_threads: tool(threads),
 	discord_bot_read: tool(read),
 	discord_bot_post: tool(post),
-	discord_bot_edit: tool(edit)
+	discord_bot_edit: tool(edit),
+	discord_bot_react: tool(react),
+	discord_bot_edit_thread: tool(editThread)
 };
 
 module.exports = {

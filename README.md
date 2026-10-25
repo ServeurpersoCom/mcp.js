@@ -251,12 +251,14 @@ stays in `config.json` and never reaches the model.
 A Discord bot over the REST API, no gateway: `discord_bot_channels` (the
 channels the bot may view), `discord_bot_threads` (active threads and archive
 pages of a forum or text channel), `discord_bot_read` (messages, oldest first,
-`after` for what came since a message), `discord_bot_post` (a message or a
-reply, or a new thread when the channel is a forum) and `discord_bot_edit` (a
-message of the bot). What the bot sees and writes is what its role is allowed
-in the guild settings, channel by channel. Nothing posted pings anyone, and no
-tool deletes. Messages read as in `discorduser`. The token stays in `config.json` and never
-reaches the model.
+`after` for what came since a message, `around` for what surrounds one),
+`discord_bot_post` (a message or a reply, or a new thread when the channel is a
+forum), `discord_bot_edit` (a message of the bot), `discord_bot_react` (a
+reaction, added or taken back) and `discord_bot_edit_thread` (rename, archive,
+lock or retag a thread). What the bot sees and writes is what its role is
+allowed in the guild settings, channel by channel. Nothing posted pings anyone,
+and no tool deletes a message. Messages read as in `discorduser`. The token
+stays in `config.json` and never reaches the model.
 
 ```json
 {
@@ -266,8 +268,8 @@ reaches the model.
 
 Create the bot in the Discord Developer Portal, enable its Message Content
 intent so `discord_bot_read` sees the text, and invite it with View Channel,
-Send Messages, Create Posts, Send Messages in Threads and Read Message
-History.
+Send Messages, Create Posts, Send Messages in Threads, Read Message History
+and Add Reactions, plus Manage Threads for the threads it did not open.
 
 ### discorduser
 
@@ -278,8 +280,11 @@ messages and their mention counts), `discord_user_channels` (the channels of a
 server you may view, under their categories, or your direct messages for
 `@me`), `discord_user_threads` (a forum or text channel's threads),
 `discord_user_read` (messages, oldest first, `after` for what came since a
-message), `discord_user_post` (a message or a reply, or a new thread when the
-channel is a forum) and `discord_user_edit` (a message of yours). Reading
+message, `around` for what surrounds one), `discord_user_search` (the messages
+a search finds in a server or a direct message), `discord_user_post` (a message
+or a reply, or a new thread when the channel is a forum), `discord_user_edit`
+(a message of yours), `discord_user_react` (a reaction, added or taken back)
+and `discord_user_edit_thread` (rename, archive, lock or retag a thread). Reading
 through the model is you reading: `discord_user_read` acks the newest message
 it shows, as opening the channel does, and an older page never moves the read
 state back. What it posts is you writing, mentions included.

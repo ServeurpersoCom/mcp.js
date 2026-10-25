@@ -75,14 +75,25 @@ const __send = async (method, options) => {
 const __get = (url, query) => __send('get', { url, query });
 const __post = (url, body) => __send('post', { url, body });
 const __patch = (url, body) => __send('patch', { url, body });
+const __put = (url) => __send('put', { url });
+const __del = (url) => __send('del', { url });
 
 // The nonce the client stamps on what it sends, a snowflake of the moment
 const __nonce = () => String((BigInt(Date.now()) - 1420070400000n) << 22n);
 
-const __channel = (cid) => {
+// A channel the client holds passes its VIEW_CHANNEL test, any other one, an
+// archived thread say, comes from the API that refuses what the account may
+// not view
+const __channel = async (cid) => {
 	const ch = __store('ChannelStore').getChannel(cid);
-	if (!ch || (ch.guild_id && !__canView(ch))) throw new Error('Channel ' + cid + ' not found or not viewable');
-	return ch;
+	if (ch && ch.guild_id && !__canView(ch)) throw new Error('Channel ' + cid + ' not found or not viewable');
+	if (ch) return ch;
+	try {
+		return await __get('/channels/' + cid);
+	} catch (e) {
+		if (NOT_VIEWABLE.includes(e.status)) throw new Error('Channel ' + cid + ' not found or not viewable');
+		throw e;
+	}
 };
 const __label = (ch) => (ch.guild_id ? '#' + ch.name : __dmName(ch));
 
@@ -90,6 +101,31 @@ const VIEW_CHANNEL = 1024n;
 const FORUM_TYPES = [15, 16];
 const NOT_VIEWABLE = [403, 404];
 const THREAD_HOLDERS = [0, 5, 15, 16];
+const THREAD_TYPES = [10, 11, 12];
+const CUSTOM_EMOJI = /^\\w+:\\d{17,20}$/;
+const EMOJI_NAME = /^\\w+$/;
+
+// Forum tags of a channel the client holds or of one the API returned
+const __tags = (ch) => ch.availableTags || ch.available_tags || [];
+const __tagIds = (forum, names) => {
+	const ids = {};
+	for (const t of __tags(forum)) ids[t.name] = t.id;
+	return names.map((n) => {
+		if (!ids[n]) throw new Error('Unknown tag "' + n + '" in ' + __label(forum) + ', tags: ' + (Object.keys(ids).join(' ') || 'none'));
+		return ids[n];
+	});
+};
+
+// Path segment of a reaction emoji: a unicode emoji as is, a custom one as
+// name:id, or by its bare name, colons allowed, among the emojis of the guild
+const __emoji = async (emoji, gid) => {
+	const text = emoji.replace(/^:(.+):$/, '$1');
+	if (CUSTOM_EMOJI.test(text) || !EMOJI_NAME.test(text)) return encodeURIComponent(text);
+	const list = gid ? await __get('/guilds/' + gid + '/emojis') : [];
+	const found = list.find((e) => e.name === text);
+	if (!found) throw new Error('Unknown emoji "' + emoji + '", a unicode emoji or a custom one of this server');
+	return encodeURIComponent(found.name + ':' + found.id);
+};
 const CTYPE = { 0: 'text', 1: 'dm', 2: 'voice', 3: 'group', 4: 'category', 5: 'announcement', 10: 'thread', 11: 'thread', 12: 'thread', 13: 'stage', 15: 'forum', 16: 'media' };
 const SYSTEM = { 1: 'added someone to the group', 2: 'removed someone from the group', 6: 'pinned a message', 7: 'joined the server', 8: 'boosted the server', 9: 'boosted the server', 10: 'boosted the server', 11: 'boosted the server', 12: 'followed a channel here', 18: 'started a thread' };
 const EMBED_TEXT = 500;
@@ -313,10 +349,10 @@ function threads(channel, before) {
 	return expr(`
 	const cid = ${channel};
 	const before = ${before};
-	const ch = __channel(cid);
+	const ch = await __channel(cid);
 	if (!THREAD_HOLDERS.includes(ch.type)) throw new Error(__label(ch) + ' holds no threads');
 	const tagName = {};
-	for (const t of ch.availableTags || []) tagName[t.id] = t.name;
+	for (const t of __tags(ch)) tagName[t.id] = t.name;
 	const line = (t, archived) => {
 		const applied = (t.appliedTags || t.applied_tags || []).map((id) => tagName[id] || id);
 		const count = t.messageCount != null ? t.messageCount : t.message_count;
@@ -341,35 +377,32 @@ function threads(channel, before) {
 }
 
 /**
- * One page of messages, oldest first
+ * One page of messages, oldest first: the newest page by default, the page
+ * after a message, around it or before it
  * @param {string} channel Channel id, JSON encoded by the caller
  * @param {string} after Message id or the literal null, JSON encoded
+ * @param {string} around Message id or the literal null, JSON encoded
  * @param {string} before Message id or the literal null, JSON encoded
  * @param {number} limit 1..100, already clamped by the caller
  */
-function read(channel, after, before, limit) {
+function read(channel, after, around, before, limit) {
 	return expr(`
 	const cid = ${channel};
 	const after = ${after};
+	const around = ${around};
 	const before = ${before};
-	const cached = __store('ChannelStore').getChannel(cid);
-	if (cached && cached.guild_id && !__canView(cached)) throw new Error('Channel ' + cid + ' not found or not viewable');
-	const ch =
-		cached ||
-		(await __get('/channels/' + cid).catch((e) => {
-			throw NOT_VIEWABLE.includes(e.status) ? new Error('Channel ' + cid + ' not found or not viewable') : e;
-		}));
+	const ch = await __channel(cid);
 	const query = { limit: ${limit} };
 	if (after != null) query.after = after;
+	else if (around != null) query.around = around;
 	else if (before != null) query.before = before;
 	const messages = await __get('/channels/' + cid + '/messages', query);
 	const ordered = messages.slice().reverse();
 	const page = {};
 	for (const m of messages) page[m.id] = m;
 	const lines = ordered.map((m) => __message(m, page, ch.guild_id));
-	if (messages.length === ${limit}) {
-		lines.push(after != null ? 'more: after=' + ordered[ordered.length - 1].id : 'more: before=' + ordered[0].id);
-	}
+	if (messages.length === ${limit} && after == null) lines.push('more: before=' + ordered[0].id);
+	if (messages.length === ${limit} && (after != null || around != null)) lines.push('more: after=' + ordered[ordered.length - 1].id);
 	const newest = messages.length ? messages[0].id : null;
 	const acked = __store('ReadStateStore').ackMessageId(cid);
 	if (newest && (!acked || BigInt(newest) > BigInt(acked))) {
@@ -398,7 +431,7 @@ function post(channel, content, reply, name, tags) {
 	const reply = ${reply};
 	const name = ${name};
 	const tags = ${tags};
-	const ch = __channel(cid);
+	const ch = await __channel(cid);
 	const message = { content, nonce: __nonce(), tts: false, flags: 0 };
 	if (!FORUM_TYPES.includes(ch.type)) {
 		if (name != null || tags != null) throw new Error('Thread_name and tags only apply to a forum, ' + __label(ch) + ' is not one');
@@ -408,12 +441,7 @@ function post(channel, content, reply, name, tags) {
 	}
 	if (name == null) throw new Error('Thread_name argument required, ' + __label(ch) + ' is a forum');
 	if (reply != null) throw new Error('Reply_to does not apply to a forum, it opens a thread');
-	const ids = {};
-	for (const t of ch.availableTags || []) ids[t.name] = t.id;
-	const applied = (tags || []).map((n) => {
-		if (!ids[n]) throw new Error('Unknown tag "' + n + '" in ' + __label(ch) + ', tags: ' + (Object.keys(ids).join(' ') || 'none'));
-		return ids[n];
-	});
+	const applied = __tagIds(ch, tags || []);
 	const t = await __post('/channels/' + cid + '/threads', { name, applied_tags: applied, message });
 	return 'Thread ' + t.id + ' "' + t.name + '" created in ' + __label(ch);
 `);
@@ -428,10 +456,80 @@ function post(channel, content, reply, name, tags) {
 function edit(channel, message, content) {
 	return expr(`
 	const cid = ${channel};
-	const ch = __channel(cid);
+	const ch = await __channel(cid);
 	const m = await __patch('/channels/' + cid + '/messages/' + ${message}, { content: ${content} });
 	return 'Message ' + m.id + ' edited in ' + __label(ch);
 `);
 }
 
-module.exports = { GUILDS, UNREAD, channels, threads, read, post, edit };
+/**
+ * Add a reaction of the account to a message, or take it back
+ * @param {string} channel Channel or thread id, JSON encoded
+ * @param {string} message Message id, JSON encoded
+ * @param {string} emoji JSON encoded
+ * @param {boolean} remove true or false
+ */
+function react(channel, message, emoji, remove) {
+	return expr(`
+	const cid = ${channel};
+	const mid = ${message};
+	const emoji = ${emoji};
+	const ch = await __channel(cid);
+	const route = '/channels/' + cid + '/messages/' + mid + '/reactions/' + (await __emoji(emoji, ch.guild_id)) + '/@me';
+	if (${remove}) {
+		await __del(route);
+		return 'Reaction ' + emoji + ' removed from message ' + mid + ' in ' + __label(ch);
+	}
+	await __put(route);
+	return 'Reaction ' + emoji + ' added to message ' + mid + ' in ' + __label(ch);
+`);
+}
+
+/**
+ * Rename, archive, lock or retag a thread
+ * @param {string} thread Thread id, JSON encoded
+ * @param {string} changes {name, archived, locked} with the absent ones left
+ * out, JSON encoded
+ * @param {string} tags Tag names list or the literal null, JSON encoded
+ */
+function editThread(thread, changes, tags) {
+	return expr(`
+	const tid = ${thread};
+	const body = ${changes};
+	const tags = ${tags};
+	const t = await __channel(tid);
+	if (!THREAD_TYPES.includes(t.type)) throw new Error(__label(t) + ' is not a thread');
+	if (tags != null) body.applied_tags = __tagIds(await __channel(t.parent_id), tags);
+	if (!Object.keys(body).length) throw new Error('Nothing to change, give name, archived, locked or tags');
+	const updated = await __patch('/channels/' + tid, body);
+	return 'Thread ' + updated.id + ' "' + updated.name + '" updated';
+`);
+}
+
+/**
+ * One page of the messages a search finds, newest first, each with the
+ * channel it sits in
+ * @param {string} guild Guild id or @me, JSON encoded
+ * @param {string} query {content, channel_id, author_id, offset} with the
+ * absent ones left out, JSON encoded
+ * @param {number} page Results per page of the search API
+ */
+function search(guild, query, page) {
+	return expr(`
+	const gid = ${guild};
+	const query = ${query};
+	const route = gid === '@me' ? '/channels/' + query.channel_id + '/messages/search' : '/guilds/' + gid + '/messages/search';
+	const res = await __get(route, query);
+	if (!res.messages) throw new Error('The search index of this server is not ready, retry in ' + (res.retry_after || 1) + ' s');
+	const offset = query.offset || 0;
+	const lines = [res.total_results + ' results'];
+	for (const [m] of res.messages) {
+		const c = __store('ChannelStore').getChannel(m.channel_id);
+		lines.push(__message(m, {}, gid === '@me' ? null : gid) + ' | in ' + (c ? __label(c) : m.channel_id));
+	}
+	if (offset + ${page} < res.total_results && res.messages.length) lines.push('more: offset=' + (offset + ${page}));
+	return lines.join('\\n');
+`);
+}
+
+module.exports = { GUILDS, UNREAD, channels, threads, read, post, edit, react, editThread, search };

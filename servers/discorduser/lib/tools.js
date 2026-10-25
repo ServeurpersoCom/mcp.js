@@ -11,9 +11,13 @@
  * - discord_user_threads: the threads of a forum or text channel
  * - discord_user_read: the messages of a channel or thread, oldest first,
  *   marking them read as the client does
+ * - discord_user_search: the messages a search finds in a server or a direct
+ *   message
  * - discord_user_post: a message, a reply, or a thread when the channel is a
  *   forum
  * - discord_user_edit: new content for a message of the account
+ * - discord_user_react: a reaction of the account, added or taken back
+ * - discord_user_edit_thread: a thread renamed, archived, locked or retagged
  *
  * Reading through these tools is the user reading, so a read acks what it
  * shows, and what is posted is the user writing, mentions included. The page
@@ -42,6 +46,8 @@ const SNOWFLAKE = /^\d{17,20}$/;
 const ARCHIVE_STAMP = /^\d{4}-\d{2}-\d{2}T[\d:.+-]+$/;
 const MESSAGES_PAGE = 50;
 const MESSAGES_MAX = 100;
+const SEARCH_PAGE = 25;
+const SEARCH_OFFSET_MAX = 9975;
 const DM_GUILD = '@me';
 
 /**
@@ -66,6 +72,29 @@ function snowflake(value, what) {
  */
 function optional(value, what) {
 	return value == null ? 'null' : JSON.stringify(snowflake(value, what));
+}
+
+/**
+ * Check an optional boolean argument
+ * @param {*} value
+ * @param {string} what Argument name for the error
+ * @returns {boolean|undefined}
+ */
+function flag(value, what) {
+	if (value != null && typeof value !== 'boolean') {
+		throw new Error(`${what} argument is not a boolean`);
+	}
+	return value == null ? undefined : value;
+}
+
+/**
+ * Check an optional list of tag names
+ * @param {*} tags
+ */
+function tagList(tags) {
+	if (tags != null && (!Array.isArray(tags) || tags.some((t) => typeof t !== 'string'))) {
+		throw new Error('Tags argument is not a list of names');
+	}
 }
 
 /**
@@ -151,15 +180,17 @@ function threads({ channel, before }) {
 }
 
 /**
- * One page of messages of a channel or thread, oldest first
- * @param {{channel: string, after?: string, before?: string, limit?: number}} args
+ * One page of messages of a channel or thread, oldest first: the newest page
+ * by default, the page after a message, around it or before it
+ * @param {{channel: string, after?: string, around?: string, before?: string, limit?: number}} args
  */
-function read({ channel, after, before, limit = MESSAGES_PAGE }) {
+function read({ channel, after, around, before, limit = MESSAGES_PAGE }) {
 	const count = Math.min(Math.max(Math.trunc(Number(limit)) || MESSAGES_PAGE, 1), MESSAGES_MAX);
 	return run(
 		snippets.read(
 			JSON.stringify(snowflake(channel, 'channel')),
 			optional(after, 'after'),
+			optional(around, 'around'),
 			optional(before, 'before'),
 			count
 		)
@@ -167,13 +198,34 @@ function read({ channel, after, before, limit = MESSAGES_PAGE }) {
 }
 
 /**
+ * One page of the messages a search finds, newest first
+ * @param {{guild: string, query: string, channel?: string, author?: string, offset?: number}} args
+ */
+function search({ guild, query, channel, author, offset }) {
+	const gid = guild === DM_GUILD ? DM_GUILD : snowflake(guild, 'guild');
+	if (gid === DM_GUILD && channel == null) {
+		throw new Error('Channel argument required, a direct message search names its conversation');
+	}
+	const q = { content: query };
+	if (channel != null) {
+		q.channel_id = snowflake(channel, 'channel');
+	}
+	if (author != null) {
+		q.author_id = snowflake(author, 'author');
+	}
+	const from = Math.min(Math.max(Math.trunc(Number(offset)) || 0, 0), SEARCH_OFFSET_MAX);
+	if (from) {
+		q.offset = from;
+	}
+	return run(snippets.search(JSON.stringify(gid), JSON.stringify(q), SEARCH_PAGE));
+}
+
+/**
  * Post a message or a reply, or open a thread when the channel is a forum
  * @param {{channel: string, content: string, reply_to?: string, thread_name?: string, tags?: string[]}} args
  */
 function post({ channel, content, reply_to, thread_name, tags }) {
-	if (tags != null && (!Array.isArray(tags) || tags.some((t) => typeof t !== 'string'))) {
-		throw new Error('Tags argument is not a list of names');
-	}
+	tagList(tags);
 	return run(
 		snippets.post(
 			JSON.stringify(snowflake(channel, 'channel')),
@@ -199,14 +251,49 @@ function edit({ channel, message_id, content }) {
 	);
 }
 
+/**
+ * Add a reaction of the account to a message, or take it back with remove
+ * @param {{channel: string, message_id: string, emoji: string, remove?: boolean}} args
+ */
+function react({ channel, message_id, emoji, remove }) {
+	const off = flag(remove, 'Remove');
+	return run(
+		snippets.react(
+			JSON.stringify(snowflake(channel, 'channel')),
+			JSON.stringify(snowflake(message_id, 'message_id')),
+			JSON.stringify(String(emoji)),
+			off === true
+		)
+	);
+}
+
+/**
+ * Rename, archive, lock or retag a thread
+ * @param {{thread: string, name?: string, archived?: boolean, locked?: boolean, tags?: string[]}} args
+ */
+function editThread({ thread, name, archived, locked, tags }) {
+	const changes = { name, archived: flag(archived, 'Archived'), locked: flag(locked, 'Locked') };
+	tagList(tags);
+	return run(
+		snippets.editThread(
+			JSON.stringify(snowflake(thread, 'thread')),
+			JSON.stringify(changes),
+			tags == null ? 'null' : JSON.stringify(tags)
+		)
+	);
+}
+
 const TOOLS_MAPPING = {
 	discord_user_guilds: tool(guilds),
 	discord_user_unread: tool(unread),
 	discord_user_channels: tool(channels),
 	discord_user_threads: tool(threads),
 	discord_user_read: tool(read),
+	discord_user_search: tool(search),
 	discord_user_post: tool(post),
-	discord_user_edit: tool(edit)
+	discord_user_edit: tool(edit),
+	discord_user_react: tool(react),
+	discord_user_edit_thread: tool(editThread)
 };
 
 module.exports = {
