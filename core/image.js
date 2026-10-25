@@ -9,7 +9,9 @@
  * The size and the EXIF orientation are read from the header before anything
  * decodes the image, so an image over the pixel limit is never decoded. The
  * decoding, resizing and encoding run in libvips through sharp, a resize in
- * scRGB, linear light in floating point, so dark gradients keep every level
+ * scRGB, linear light in floating point, so dark gradients keep every level.
+ * The decoding ignores any embedded ICC profile, as KiSS does, the pixels read
+ * as sRGB
  *
  * imageResults hands a tool the result an image makes: a line saying what was
  * read and what is sent, then the image block
@@ -177,7 +179,8 @@ async function imageFit(bytes, limits) {
 	}
 
 	try {
-		const decoded = () => sharp(bytes, { limitInputPixels: limits.pixels, pages: 1 });
+		const decoded = () =>
+			sharp(bytes, { limitInputPixels: limits.pixels, pages: 1, ignoreIcc: true });
 		out.transparent = !(await decoded().stats()).isOpaque;
 
 		// the same scale on both sides, the image turned upright as its EXIF says
@@ -195,6 +198,15 @@ async function imageFit(bytes, limits) {
 				.pipelineColourspace('scrgb')
 				.resize(out.width, out.height, { fit: 'fill' })
 				.toColourspace('srgb');
+
+			// a pipeline flattens before it resizes, so a transparent image goes
+			// through a second one and is laid on white in sRGB, as one that keeps
+			// its size is
+			if (out.transparent) {
+				const { data, info } = await pipeline.raw().toBuffer({ resolveWithObject: true });
+				const { width, height, channels } = info;
+				pipeline = sharp(data, { raw: { width, height, channels } });
+			}
 		}
 		out.data = await pipeline
 			.flatten({ background: '#ffffff' })
