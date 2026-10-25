@@ -1,11 +1,15 @@
 /**
  * Email Tools Module
- * Exposes a mailbox over IMAP as three read only tools, the gestures of an
- * ordinary mail client
+ * Exposes a mailbox over IMAP as three tools, the gestures of an ordinary
+ * mail client
  *
  * - email_folders: the folder column with its counts
  * - email_list: one line per message, filtered on the server, paged by uid
- * - email_read: one message, its headers at two levels of detail
+ * - email_read: one message, its headers at two levels of detail, flagged
+ *   \Seen as a client does when the user opens it
+ *
+ * Listing only looks, so the folders open read only there and the unseen
+ * state of a list stays what the user has not read yet
  *
  * Output stays compact for the context: a list is plain lines rather than
  * JSON, and a message carries the headers a client shows unless the raw block
@@ -15,7 +19,7 @@
  */
 
 const { simpleParser } = require('mailparser');
-const { session, examine } = require('./imap');
+const { session, open } = require('./imap');
 const { textResult } = require('../../../core/tool-result');
 
 const config = require('../config.json').email;
@@ -156,7 +160,7 @@ async function list({
 	if (before != null) query.uid = `1:${uidOf(before, 'before') - 1}`;
 	if (Object.keys(query).length === 0) query.all = true;
 
-	return examine(folder, async (client) => {
+	return open(folder, true, async (client) => {
 		const uids = (await client.search(query, { uid: true })) || [];
 		const page = uids.slice(-count);
 		if (page.length === 0) {
@@ -185,14 +189,14 @@ async function list({
 }
 
 /**
- * One message with its headers, body and attachment list
+ * One message with its headers, body and attachment list, flagged \Seen
  * @param {{folder: string, uid: number, headers?: string}} args
  * @returns {Promise<string>}
  */
 async function read({ folder, uid, headers = 'summary' }) {
 	const id = uidOf(uid, 'uid');
 
-	return examine(folder, async (client) => {
+	return open(folder, false, async (client) => {
 		const msg = await client.fetchOne(
 			String(id),
 			{ uid: true, flags: true, source: true },
@@ -201,6 +205,9 @@ async function read({ folder, uid, headers = 'summary' }) {
 		if (!msg) {
 			throw new Error(`No message with uid ${id} in ${folder}`);
 		}
+
+		await client.messageFlagsAdd(String(id), ['\\Seen'], { uid: true });
+		msg.flags.add('\\Seen');
 
 		const mail = await simpleParser(msg.source);
 		const out = [];

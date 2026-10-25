@@ -1,7 +1,7 @@
 /**
- * Discord user read module
- * Reads what the user's own Discord account sees, through the client the user
- * already runs, over its Chrome DevTools Protocol debugging port
+ * Discord user module
+ * Acts as the user's own Discord account, through the client the user already
+ * runs, over its Chrome DevTools Protocol debugging port
  *
  * - discord_user_guilds: the direct messages as @me, then the servers in the
  *   order of the account's guild bar
@@ -9,11 +9,15 @@
  * - discord_user_channels: the viewable channels of a guild under their
  *   categories, or the direct messages for @me
  * - discord_user_threads: the threads of a forum or text channel
- * - discord_user_read: the messages of a channel or thread, oldest first
+ * - discord_user_read: the messages of a channel or thread, oldest first,
+ *   marking them read as the client does
+ * - discord_user_post: a message, a reply, or a thread when the channel is a
+ *   forum
+ * - discord_user_edit: new content for a message of the account
  *
- * Every tool is read only: the page runs frozen snippets that call only the
- * client read gestures, so nothing is posted, no reaction is added and no
- * channel is marked seen. The account never acts, it only reports what it sees
+ * Reading through these tools is the user reading, so a read acks what it
+ * shows, and what is posted is the user writing, mentions included. The page
+ * runs frozen snippets fed only with checked, JSON encoded values
  *
  * With an ssh block the client runs on another machine and each call opens a
  * forward to its loopback debugging port; without one the port is local. The
@@ -52,6 +56,16 @@ function snowflake(value, what) {
 		throw new Error(`Invalid ${what} "${text}", a Discord id`);
 	}
 	return text;
+}
+
+/**
+ * An optional snowflake as a snippet argument, the literal null when absent
+ * @param {*} value
+ * @param {string} what Argument name for the error
+ * @returns {string}
+ */
+function optional(value, what) {
+	return value == null ? 'null' : JSON.stringify(snowflake(value, what));
 }
 
 /**
@@ -141,9 +155,42 @@ function read({ channel, after, before, limit = MESSAGES_PAGE }) {
 	return run(
 		snippets.read(
 			JSON.stringify(snowflake(channel, 'channel')),
-			after == null ? 'null' : JSON.stringify(snowflake(after, 'after')),
-			before == null ? 'null' : JSON.stringify(snowflake(before, 'before')),
+			optional(after, 'after'),
+			optional(before, 'before'),
 			count
+		)
+	);
+}
+
+/**
+ * Post a message or a reply, or open a thread when the channel is a forum
+ * @param {{channel: string, content: string, reply_to?: string, thread_name?: string, tags?: string[]}} args
+ */
+function post({ channel, content, reply_to, thread_name, tags }) {
+	if (tags != null && (!Array.isArray(tags) || tags.some((t) => typeof t !== 'string'))) {
+		throw new Error('Tags argument is not a list of names');
+	}
+	return run(
+		snippets.post(
+			JSON.stringify(snowflake(channel, 'channel')),
+			JSON.stringify(String(content)),
+			optional(reply_to, 'reply_to'),
+			thread_name == null ? 'null' : JSON.stringify(String(thread_name)),
+			tags == null ? 'null' : JSON.stringify(tags)
+		)
+	);
+}
+
+/**
+ * Replace the content of a message of the account
+ * @param {{channel: string, message_id: string, content: string}} args
+ */
+function edit({ channel, message_id, content }) {
+	return run(
+		snippets.edit(
+			JSON.stringify(snowflake(channel, 'channel')),
+			JSON.stringify(snowflake(message_id, 'message_id')),
+			JSON.stringify(String(content))
 		)
 	);
 }
@@ -153,7 +200,9 @@ const TOOLS_MAPPING = {
 	discord_user_unread: tool(unread),
 	discord_user_channels: tool(channels),
 	discord_user_threads: tool(threads),
-	discord_user_read: tool(read)
+	discord_user_read: tool(read),
+	discord_user_post: tool(post),
+	discord_user_edit: tool(edit)
 };
 
 module.exports = {

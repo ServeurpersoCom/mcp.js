@@ -1,9 +1,9 @@
 # mcp.js
 
 The Model Context Protocol server I run every day, published as it is. It
-serves a Podman sandbox, a persistent memory, a read only mailbox, an agent
-account on Moltbook, a Discord bot, a read only view of your own Discord
-account and a 1fichier account to any MCP client, behind one
+serves a Podman sandbox, a persistent memory, a mailbox, an agent account on
+Moltbook, a Discord bot, your own Discord account and a 1fichier account to
+any MCP client, behind one
 endpoint. Built on the
 official TypeScript SDK v2
 ([@modelcontextprotocol/server](https://github.com/modelcontextprotocol/typescript-sdk)),
@@ -42,10 +42,10 @@ core/                protocol, auth, and the three transports
 core/transports/     stdio, Streamable HTTP
 servers/sandbox/     bash_tool, view, create_file, str_replace in a Podman container
 servers/memory/      a persistent memory in plain files
-servers/email/       a read only mailbox over IMAPS
+servers/email/       a mailbox over IMAPS
 servers/moltbook/    an agent account on Moltbook
 servers/discordbot/  a Discord bot over the REST API
-servers/discorduser/ a read only view of your own Discord account, over its debug port
+servers/discorduser/ your own Discord account, over its debug port
 servers/onefichier/  a 1fichier account
 mcp-bridge/          an OpenAI compatible proxy that runs the tools for MCP-less UIs
 main.js              binds every server to one transport
@@ -216,10 +216,11 @@ goes to a temporary file then a rename.
 
 ### email
 
-A read only mailbox: `email_folders`, `email_list` (one line per message,
-filtered on the server, paged by uid) and `email_read` (the headers a client
-shows, or the raw block for provenance questions). Every folder opens with
-`EXAMINE`, so nothing changes and reading leaves a message unseen.
+A mailbox: `email_folders`, `email_list` (one line per message, filtered on
+the server, paged by uid) and `email_read` (the headers a client shows, or the
+raw block for provenance questions). Reading through the model is you reading:
+`email_read` flags the message `\Seen`, while `email_list` opens the folder
+with `EXAMINE` and leaves the unseen state as it is.
 
 ```json
 {
@@ -250,7 +251,8 @@ stays in `config.json` and never reaches the model.
 A Discord bot over the REST API, no gateway: `discord_bot_channels`,
 `discord_bot_threads` (active threads and archive pages of a forum or text
 channel), `discord_bot_read` (messages, oldest first), `discord_bot_post` (a
-message, or a new thread when the channel is a forum) and `discord_bot_edit`
+message or a reply, or a new thread when the channel is a forum) and
+`discord_bot_edit`
 (a message of the bot). What the bot sees and writes is what its role is
 allowed in the guild settings, channel by channel. Nothing posted pings
 anyone, and no tool deletes. The token stays in `config.json` and never
@@ -269,15 +271,18 @@ History.
 
 ### discorduser
 
-A read only view of your own Discord account, through the client you already
-run: `discord_user_guilds` (your direct messages as `@me`, then your servers
+Your own Discord account, through the client you already run:
+`discord_user_guilds` (your direct messages as `@me`, then your servers
 in guild bar order), `discord_user_unread` (the conversations with unread
 messages and their mention counts), `discord_user_channels` (the channels of a
 server you may view, under their categories, or your direct messages for
-`@me`), `discord_user_threads` (a forum or text channel's threads) and
+`@me`), `discord_user_threads` (a forum or text channel's threads),
 `discord_user_read` (messages, oldest first, `after` for what came since a
-message). These tools only read: nothing is posted, no reaction is added, no
-channel is marked seen, so the account keeps the unread state as you left it.
+message), `discord_user_post` (a message or a reply, or a new thread when the
+channel is a forum) and `discord_user_edit` (a message of yours). Reading
+through the model is you reading: `discord_user_read` acks the newest message
+it shows, as opening the channel does, and an older page never moves the read
+state back. What it posts is you writing, mentions included.
 Ids in messages are rendered as names, and stickers, replies, embeds, polls
 and forwarded messages as words, so the output reads aloud or in braille.
 

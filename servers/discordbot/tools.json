@@ -72,7 +72,7 @@
 		"type": "function",
 		"function": {
 			"name": "discord_bot_post",
-			"description": "Post in a channel or thread, or open a thread when the channel is a forum, thread_name then required. Nothing posted pings anyone. Only when the user asks.",
+			"description": "Post in a channel or thread, as a reply with reply_to, or open a thread when the channel is a forum, thread_name then required. Nothing posted pings anyone. Only when the user asks.",
 			"parameters": {
 				"properties": {
 					"channel": {
@@ -82,6 +82,11 @@
 					},
 					"content": {
 						"title": "Message, up to 2000 characters",
+						"type": "string",
+						"minLength": 1
+					},
+					"reply_to": {
+						"title": "Id of the message this one answers, not in a forum",
 						"type": "string",
 						"minLength": 1
 					},

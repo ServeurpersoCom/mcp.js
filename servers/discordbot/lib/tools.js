@@ -252,24 +252,29 @@ async function read({ channel: id, before, limit = MESSAGES_PAGE }) {
 }
 
 /**
- * Post a message, or open a thread when the channel is a forum
- * @param {{channel: string, content: string, thread_name?: string, tags?: string[]}} args
+ * Post a message or a reply, or open a thread when the channel is a forum
+ * @param {{channel: string, content: string, reply_to?: string, thread_name?: string, tags?: string[]}} args
  */
-async function post({ channel: id, content, thread_name, tags }) {
+async function post({ channel: id, content, reply_to, thread_name, tags }) {
 	const ch = await channel(id);
 
 	if (!FORUM_TYPES.includes(ch.type)) {
 		if (thread_name != null || tags != null) {
 			throw new Error(`Thread_name and tags only apply to a forum, #${ch.name} is not one`);
 		}
-		const m = await call('POST', `/channels/${ch.id}/messages`, {
-			body: { content, allowed_mentions: NO_MENTIONS }
-		});
+		const body = { content, allowed_mentions: NO_MENTIONS };
+		if (reply_to != null) {
+			body.message_reference = { message_id: snowflake(reply_to, 'reply_to') };
+		}
+		const m = await call('POST', `/channels/${ch.id}/messages`, { body });
 		return `Message ${m.id} posted in #${ch.name}`;
 	}
 
 	if (!thread_name) {
 		throw new Error(`Thread_name argument required, #${ch.name} is a forum`);
+	}
+	if (reply_to != null) {
+		throw new Error('Reply_to does not apply to a forum, it opens a thread');
 	}
 	if (tags != null && !Array.isArray(tags)) {
 		throw new Error('Tags argument is not a list');
@@ -277,7 +282,7 @@ async function post({ channel: id, content, thread_name, tags }) {
 	const ids = Object.fromEntries((ch.available_tags || []).map((tag) => [tag.name, tag.id]));
 	const applied = (tags || []).map((name) => {
 		if (!ids[name]) {
-			throw new Error(`Unknown tag "${name}" in #${ch.name}, tags: ${Object.keys(ids).join(' ')}`);
+			throw new Error(`Unknown tag "${name}" in #${ch.name}, tags: ${Object.keys(ids).join(' ') || 'none'}`);
 		}
 		return ids[name];
 	});

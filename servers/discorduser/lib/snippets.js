@@ -1,14 +1,18 @@
 /**
  * Page snippets
  * The expressions evaluated inside the client, frozen here and parameterized
- * only through values JSON encoded by the caller, so the page runs read gestures
- * and never caller supplied code
+ * only through values JSON encoded by the caller, so the page runs the gestures
+ * of the account and never caller supplied code
  *
  * PRELUDE reaches the webpack runtime that holds the Flux stores and the REST
- * client, then exposes read helpers: stores by their stable getName, the request
- * module by its exact get/post/put/patch/del shape, and the renderers that turn
- * ids into the names a reader needs. Only req.get is ever called, so a snippet
- * reads and never writes, reacts or marks anything seen
+ * client, then exposes helpers: stores by their stable getName, the request
+ * module by its exact get/post/put/patch/del shape behind __get, __post and
+ * __patch, and the renderers that turn ids into the names a reader needs
+ *
+ * Reading a page acks its newest message when it is newer than the read state,
+ * as opening the channel does, so the unread counts follow what was read and
+ * paging through older history never moves them back. Posting and editing go
+ * through the same requests the client sends when the user types
  *
  * What a snippet lists is what the account may view: guild channels pass the
  * VIEW_CHANNEL permission, and direct messages sit under the pseudo guild @me
@@ -53,13 +57,34 @@ const __store = (name) => {
 	return s;
 };
 
-const __get = async (url, query) => {
+// A refused request rejects with the response, turned here into an error that
+// carries its status and body
+const __send = async (method, options) => {
 	if (!__http) throw new Error('REST client not found, the client changed');
-	const res = await __http.get({ url, query });
-	return res.body;
+	try {
+		const res = await __http[method](options);
+		return res.body;
+	} catch (e) {
+		if (e && e.status) throw new Error('HTTP ' + e.status + ' ' + JSON.stringify(e.body));
+		throw e;
+	}
 };
+const __get = (url, query) => __send('get', { url, query });
+const __post = (url, body) => __send('post', { url, body });
+const __patch = (url, body) => __send('patch', { url, body });
+
+// The nonce the client stamps on what it sends, a snowflake of the moment
+const __nonce = () => String((BigInt(Date.now()) - 1420070400000n) << 22n);
+
+const __channel = (cid) => {
+	const ch = __store('ChannelStore').getChannel(cid);
+	if (!ch || (ch.guild_id && !__canView(ch))) throw new Error('Channel ' + cid + ' not found or not viewable');
+	return ch;
+};
+const __label = (ch) => (ch.guild_id ? '#' + ch.name : __dmName(ch));
 
 const VIEW_CHANNEL = 1024n;
+const FORUM_TYPES = [15, 16];
 const CTYPE = { 0: 'text', 1: 'dm', 2: 'voice', 3: 'group', 4: 'category', 5: 'announcement', 10: 'thread', 11: 'thread', 12: 'thread', 13: 'stage', 15: 'forum', 16: 'media' };
 const SYSTEM = { 1: 'added someone to the group', 2: 'removed someone from the group', 6: 'pinned a message', 7: 'joined the server', 8: 'boosted the server', 9: 'boosted the server', 10: 'boosted the server', 11: 'boosted the server', 12: 'followed a channel here', 18: 'started a thread' };
 const EMBED_TEXT = 500;
@@ -334,8 +359,68 @@ function read(channel, after, before, limit) {
 	if (messages.length === ${limit}) {
 		lines.push(after != null ? 'more: after=' + ordered[ordered.length - 1].id : 'more: before=' + ordered[0].id);
 	}
+	const newest = messages.length ? messages[0].id : null;
+	const acked = __store('ReadStateStore').ackMessageId(cid);
+	if (newest && (!acked || BigInt(newest) > BigInt(acked))) {
+		try {
+			await __post('/channels/' + cid + '/messages/' + newest + '/ack', { token: null });
+		} catch (e) {
+			lines.push('ack failed: ' + e.message);
+		}
+	}
 	return lines.join('\\n') || 'No message';
 `);
 }
 
-module.exports = { GUILDS, UNREAD, channels, threads, read };
+/**
+ * Post a message, or open a thread when the channel is a forum
+ * @param {string} channel Channel, forum, thread or direct message id, JSON encoded
+ * @param {string} content JSON encoded
+ * @param {string} reply Message id or the literal null, JSON encoded
+ * @param {string} name Thread name or the literal null, JSON encoded
+ * @param {string} tags Tag names list or the literal null, JSON encoded
+ */
+function post(channel, content, reply, name, tags) {
+	return expr(`
+	const cid = ${channel};
+	const content = ${content};
+	const reply = ${reply};
+	const name = ${name};
+	const tags = ${tags};
+	const ch = __channel(cid);
+	const message = { content, nonce: __nonce(), tts: false, flags: 0 };
+	if (!FORUM_TYPES.includes(ch.type)) {
+		if (name != null || tags != null) throw new Error('Thread_name and tags only apply to a forum, ' + __label(ch) + ' is not one');
+		if (reply != null) message.message_reference = { message_id: reply };
+		const m = await __post('/channels/' + cid + '/messages', message);
+		return 'Message ' + m.id + ' posted in ' + __label(ch);
+	}
+	if (name == null) throw new Error('Thread_name argument required, ' + __label(ch) + ' is a forum');
+	if (reply != null) throw new Error('Reply_to does not apply to a forum, it opens a thread');
+	const ids = {};
+	for (const t of ch.availableTags || []) ids[t.name] = t.id;
+	const applied = (tags || []).map((n) => {
+		if (!ids[n]) throw new Error('Unknown tag "' + n + '" in ' + __label(ch) + ', tags: ' + (Object.keys(ids).join(' ') || 'none'));
+		return ids[n];
+	});
+	const t = await __post('/channels/' + cid + '/threads', { name, applied_tags: applied, message });
+	return 'Thread ' + t.id + ' "' + t.name + '" created in ' + __label(ch);
+`);
+}
+
+/**
+ * Replace the content of a message of the account
+ * @param {string} channel Channel or thread id, JSON encoded
+ * @param {string} message Message id, JSON encoded
+ * @param {string} content JSON encoded
+ */
+function edit(channel, message, content) {
+	return expr(`
+	const cid = ${channel};
+	const ch = __channel(cid);
+	const m = await __patch('/channels/' + cid + '/messages/' + ${message}, { content: ${content} });
+	return 'Message ' + m.id + ' edited in ' + __label(ch);
+`);
+}
+
+module.exports = { GUILDS, UNREAD, channels, threads, read, post, edit };

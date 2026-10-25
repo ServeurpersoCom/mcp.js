@@ -9,9 +9,8 @@
  * certificate file is read at each session, so a missing one fails the email
  * tools alone and never the start of the server
  *
- * Every folder opens with EXAMINE, the read only select of the protocol: the
- * server refuses any change and fetching a message leaves its \Seen flag as
- * it is. No command of this module writes to the mailbox
+ * A folder opens with EXAMINE, the read only select of the protocol, when the
+ * call only looks, and with SELECT when it changes flags
  */
 
 const fs = require('fs');
@@ -57,14 +56,15 @@ async function session(fn) {
 }
 
 /**
- * Run fn with folder opened read only
+ * Run fn with folder opened, read only with EXAMINE or writable with SELECT
  * @param {string} folder
+ * @param {boolean} readOnly
  * @param {function(ImapFlow): Promise<*>} fn
  * @returns {Promise<*>} What fn resolves to
  */
-async function examine(folder, fn) {
+async function open(folder, readOnly, fn) {
 	return session(async (client) => {
-		const lock = await client.getMailboxLock(folder, { readOnly: true });
+		const lock = await client.getMailboxLock(folder, { readOnly });
 		try {
 			return await fn(client);
 		} finally {
@@ -73,4 +73,4 @@ async function examine(folder, fn) {
 	});
 }
 
-module.exports = { session, examine };
+module.exports = { session, open };
