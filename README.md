@@ -37,18 +37,18 @@ npm install
 ## Layout
 
 ```
-config.json         transport, credentials, and the identity served
-core/               protocol, auth, and the three transports
-core/transports/    stdio, Streamable HTTP
-servers/sandbox/    bash_tool, view, create_file, str_replace in a Podman container
-servers/memory/     a persistent memory in plain files
-servers/email/      a read only mailbox over IMAPS
-servers/moltbook/   an agent account on Moltbook
-servers/discord/    a Discord bot over the REST API
+config.json          transport, credentials, and the identity served
+core/                protocol, auth, and the three transports
+core/transports/     stdio, Streamable HTTP
+servers/sandbox/     bash_tool, view, create_file, str_replace in a Podman container
+servers/memory/      a persistent memory in plain files
+servers/email/       a read only mailbox over IMAPS
+servers/moltbook/    an agent account on Moltbook
+servers/discordbot/  a Discord bot over the REST API
 servers/discorduser/ a read only view of your own Discord account, over its debug port
-servers/onefichier/ a 1fichier account
-mcp-bridge/         an OpenAI compatible proxy that runs the tools for MCP-less UIs
-main.js             binds every server to one transport
+servers/onefichier/  a 1fichier account
+mcp-bridge/          an OpenAI compatible proxy that runs the tools for MCP-less UIs
+main.js              binds every server to one transport
 ```
 
 Every server under `servers/` is loaded at startup and their tools and
@@ -245,15 +245,15 @@ for AI agents: home, feed, posts, comments, search, profiles, communities,
 votes, follows, and the verification challenge of each new post. The API key
 stays in `config.json` and never reaches the model.
 
-### discord
+### discordbot
 
-A Discord bot over the REST API, no gateway: `discord_channels`,
-`discord_threads` (active threads and archive pages of a forum or text
-channel), `discord_read` (messages, oldest first), `discord_post` (a message,
-or a new thread when the channel is a forum) and `discord_edit` (a message of
-the bot). What the bot sees and writes is what its role is allowed in the
-guild settings, channel by channel. Nothing posted pings anyone, and no tool
-deletes. The token stays in `config.json` and never
+A Discord bot over the REST API, no gateway: `discord_bot_channels`,
+`discord_bot_threads` (active threads and archive pages of a forum or text
+channel), `discord_bot_read` (messages, oldest first), `discord_bot_post` (a
+message, or a new thread when the channel is a forum) and `discord_bot_edit`
+(a message of the bot). What the bot sees and writes is what its role is
+allowed in the guild settings, channel by channel. Nothing posted pings
+anyone, and no tool deletes. The token stays in `config.json` and never
 reaches the model.
 
 ```json
@@ -263,8 +263,9 @@ reaches the model.
 ```
 
 Create the bot in the Discord Developer Portal, enable its Message Content
-intent so `discord_read` sees the text, and invite it with View Channel, Send
-Messages, Create Posts, Send Messages in Threads and Read Message History.
+intent so `discord_bot_read` sees the text, and invite it with View Channel,
+Send Messages, Create Posts, Send Messages in Threads and Read Message
+History.
 
 ### discorduser
 

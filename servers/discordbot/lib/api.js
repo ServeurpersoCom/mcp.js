@@ -8,7 +8,7 @@
  * snowflake so it never climbs to another route
  */
 
-const config = require('../config.json').discord;
+const config = require('../config.json').discordbot;
 
 const USER_AGENT = 'DiscordBot (mcp.js, 1)';
 const SNOWFLAKE = /^\d{17,20}$/;
@@ -37,7 +37,7 @@ function snowflake(value, what) {
  */
 async function request(method, route, { query, body } = {}) {
 	if (!config.token) {
-		throw new Error('No Discord bot token, set discord.token in config.json');
+		throw new Error('No Discord bot token, set discordbot.token in config.json');
 	}
 
 	const url = new URL(config.baseUrl + route);

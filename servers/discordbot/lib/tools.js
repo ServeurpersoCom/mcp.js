@@ -1,9 +1,9 @@
 /**
- * Discord Tools Module
+ * Discord bot module
  * Exposes a bot account over the Discord REST API, no gateway
  *
- * - discord_channels, discord_threads, discord_read: read
- * - discord_post, discord_edit: write
+ * - discord_bot_channels, discord_bot_threads, discord_bot_read: read
+ * - discord_bot_post, discord_bot_edit: write
  *
  * What the bot may see and write is the permissions Discord grants its role,
  * set per channel in the guild settings
@@ -21,7 +21,7 @@
 const { snowflake, request } = require('./api');
 const { textResult } = require('../../../core/tool-result');
 
-const config = require('../config.json').discord;
+const config = require('../config.json').discordbot;
 
 const TOOLS_DEFINITIONS = require('../tools.json').map((tool) => ({
 	name: tool.function.name,
@@ -309,11 +309,11 @@ async function edit({ channel: id, message_id, content }) {
 }
 
 const TOOLS_MAPPING = {
-	discord_channels: tool(channels),
-	discord_threads: tool(threads),
-	discord_read: tool(read),
-	discord_post: tool(post),
-	discord_edit: tool(edit)
+	discord_bot_channels: tool(channels),
+	discord_bot_threads: tool(threads),
+	discord_bot_read: tool(read),
+	discord_bot_post: tool(post),
+	discord_bot_edit: tool(edit)
 };
 
 module.exports = {
