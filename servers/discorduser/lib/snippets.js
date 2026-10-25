@@ -399,6 +399,7 @@ function read(channel, after, around, before, limit) {
 	else if (around != null) query.around = around;
 	else if (before != null) query.before = before;
 	const messages = await __get('/channels/' + cid + '/messages', query);
+	if (!Array.isArray(messages)) throw new Error('No message list for ' + __label(ch) + ', the client answered ' + JSON.stringify(messages));
 	const ordered = messages.slice().reverse();
 	const page = {};
 	for (const m of messages) page[m.id] = m;
