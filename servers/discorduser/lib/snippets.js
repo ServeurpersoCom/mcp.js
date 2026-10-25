@@ -16,6 +16,9 @@
  *
  * What a snippet lists is what the account may view: guild channels pass the
  * VIEW_CHANNEL permission, and direct messages sit under the pseudo guild @me
+ *
+ * A snippet resolves to its text, or to {error} carrying the message of what
+ * it threw
  */
 
 const PRELUDE = `
@@ -65,7 +68,7 @@ const __send = async (method, options) => {
 		const res = await __http[method](options);
 		return res.body;
 	} catch (e) {
-		if (e && e.status) throw new Error('HTTP ' + e.status + ' ' + JSON.stringify(e.body));
+		if (e && e.status) throw Object.assign(new Error('HTTP ' + e.status + ' ' + JSON.stringify(e.body)), { status: e.status });
 		throw e;
 	}
 };
@@ -85,6 +88,8 @@ const __label = (ch) => (ch.guild_id ? '#' + ch.name : __dmName(ch));
 
 const VIEW_CHANNEL = 1024n;
 const FORUM_TYPES = [15, 16];
+const NOT_VIEWABLE = [403, 404];
+const THREAD_HOLDERS = [0, 5, 15, 16];
 const CTYPE = { 0: 'text', 1: 'dm', 2: 'voice', 3: 'group', 4: 'category', 5: 'announcement', 10: 'thread', 11: 'thread', 12: 'thread', 13: 'stage', 15: 'forum', 16: 'media' };
 const SYSTEM = { 1: 'added someone to the group', 2: 'removed someone from the group', 6: 'pinned a message', 7: 'joined the server', 8: 'boosted the server', 9: 'boosted the server', 10: 'boosted the server', 11: 'boosted the server', 12: 'followed a channel here', 18: 'started a thread' };
 const EMBED_TEXT = 500;
@@ -179,7 +184,8 @@ const __replyTo = (m, page) => {
 	return 'message ' + ref;
 };
 
-const __message = (m, page) => {
+// A message fetched over REST carries no guild id: the channel read gives it
+const __message = (m, page, guildId) => {
 	const names = {};
 	for (const u of m.mentions || []) names[u.id] = __author(u);
 	const author = __author(m.author);
@@ -187,21 +193,21 @@ const __message = (m, page) => {
 
 	if (SYSTEM[m.type]) {
 		parts.push('* ' + author + ' ' + SYSTEM[m.type]);
-		if (m.content) parts.push(__plain(m.content, m.guild_id, names));
+		if (m.content) parts.push(__plain(m.content, guildId, names));
 		return parts.join(' ');
 	}
 
 	parts.push(author + ':');
-	const body = __plain(m.content, m.guild_id, names);
+	const body = __plain(m.content, guildId, names);
 	if (body) parts.push(body);
 	const to = m.type === 19 ? __replyTo(m, page) : null;
 	if (to) parts.push('| reply to ' + to);
-	parts.push(...__extras(m, m.guild_id, names, m.content));
+	parts.push(...__extras(m, guildId, names, m.content));
 	for (const snap of m.message_snapshots || []) {
 		const f = snap.message || {};
-		const fwd = __plain(f.content, m.guild_id, names);
+		const fwd = __plain(f.content, guildId, names);
 		parts.push('| forwarded' + (fwd ? ': ' + fwd : ''));
-		parts.push(...__extras(f, m.guild_id, names, f.content));
+		parts.push(...__extras(f, guildId, names, f.content));
 	}
 	for (const r of m.reactions || []) {
 		const name = r.emoji && (r.emoji.name || r.emoji.id);
@@ -212,12 +218,13 @@ const __message = (m, page) => {
 `;
 
 /**
- * Wrap a snippet body as one awaited expression, prelude included
+ * Wrap a snippet body as one awaited expression, prelude included, a thrown
+ * error resolving to {error}
  * @param {string} body A block that returns a value
  * @returns {string}
  */
 function expr(body) {
-	return `(async () => {\n${PRELUDE}\n${body}\n})()`;
+	return `(async () => {\ntry {\n${PRELUDE}\n${body}\n} catch (e) {\nreturn { error: String((e && e.message) || e) };\n}\n})()`;
 }
 
 /**
@@ -306,8 +313,8 @@ function threads(channel, before) {
 	return expr(`
 	const cid = ${channel};
 	const before = ${before};
-	const ch = __store('ChannelStore').getChannel(cid);
-	if (!ch || !__canView(ch)) throw new Error('Channel ' + cid + ' not found or not viewable');
+	const ch = __channel(cid);
+	if (!THREAD_HOLDERS.includes(ch.type)) throw new Error(__label(ch) + ' holds no threads');
 	const tagName = {};
 	for (const t of ch.availableTags || []) tagName[t.id] = t.name;
 	const line = (t, archived) => {
@@ -329,7 +336,7 @@ function threads(channel, before) {
 	if (page && page.has_more && page.threads.length) {
 		lines.push('more: before=' + page.threads[page.threads.length - 1].thread_metadata.archive_timestamp);
 	}
-	return lines.join('\\n') || 'No thread in this channel';
+	return lines.join('\\n') || 'No thread in ' + __label(ch);
 `);
 }
 
@@ -345,17 +352,21 @@ function read(channel, after, before, limit) {
 	const cid = ${channel};
 	const after = ${after};
 	const before = ${before};
-	const ch = __store('ChannelStore').getChannel(cid);
-	if (ch && ch.guild_id && !__canView(ch)) throw new Error('Channel ' + cid + ' is not viewable');
+	const cached = __store('ChannelStore').getChannel(cid);
+	if (cached && cached.guild_id && !__canView(cached)) throw new Error('Channel ' + cid + ' not found or not viewable');
+	const ch =
+		cached ||
+		(await __get('/channels/' + cid).catch((e) => {
+			throw NOT_VIEWABLE.includes(e.status) ? new Error('Channel ' + cid + ' not found or not viewable') : e;
+		}));
 	const query = { limit: ${limit} };
 	if (after != null) query.after = after;
 	else if (before != null) query.before = before;
 	const messages = await __get('/channels/' + cid + '/messages', query);
-	if (!Array.isArray(messages)) throw new Error('Channel ' + cid + ' returned no messages, is it readable');
 	const ordered = messages.slice().reverse();
 	const page = {};
 	for (const m of messages) page[m.id] = m;
-	const lines = ordered.map((m) => __message(m, page));
+	const lines = ordered.map((m) => __message(m, page, ch.guild_id));
 	if (messages.length === ${limit}) {
 		lines.push(after != null ? 'more: after=' + ordered[ordered.length - 1].id : 'more: before=' + ordered[0].id);
 	}
@@ -368,7 +379,7 @@ function read(channel, after, before, limit) {
 			lines.push('ack failed: ' + e.message);
 		}
 	}
-	return lines.join('\\n') || 'No message';
+	return lines.join('\\n') || 'No message in ' + __label(ch);
 `);
 }
 

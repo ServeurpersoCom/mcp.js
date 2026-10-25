@@ -248,14 +248,14 @@ stays in `config.json` and never reaches the model.
 
 ### discordbot
 
-A Discord bot over the REST API, no gateway: `discord_bot_channels`,
-`discord_bot_threads` (active threads and archive pages of a forum or text
-channel), `discord_bot_read` (messages, oldest first), `discord_bot_post` (a
-message or a reply, or a new thread when the channel is a forum) and
-`discord_bot_edit`
-(a message of the bot). What the bot sees and writes is what its role is
-allowed in the guild settings, channel by channel. Nothing posted pings
-anyone, and no tool deletes. The token stays in `config.json` and never
+A Discord bot over the REST API, no gateway: `discord_bot_channels` (the
+channels the bot may view), `discord_bot_threads` (active threads and archive
+pages of a forum or text channel), `discord_bot_read` (messages, oldest first,
+`after` for what came since a message), `discord_bot_post` (a message or a
+reply, or a new thread when the channel is a forum) and `discord_bot_edit` (a
+message of the bot). What the bot sees and writes is what its role is allowed
+in the guild settings, channel by channel. Nothing posted pings anyone, and no
+tool deletes. Messages read as in `discorduser`. The token stays in `config.json` and never
 reaches the model.
 
 ```json
@@ -283,8 +283,8 @@ channel is a forum) and `discord_user_edit` (a message of yours). Reading
 through the model is you reading: `discord_user_read` acks the newest message
 it shows, as opening the channel does, and an older page never moves the read
 state back. What it posts is you writing, mentions included.
-Ids in messages are rendered as names, and stickers, replies, embeds, polls
-and forwarded messages as words, so the output reads aloud or in braille.
+Ids in messages are rendered as names, and stickers, replies, embeds, polls,
+forwarded messages and reactions as words, so the output reads aloud or in braille.
 
 Start the client with Chromium's debugging flag, loopback only. On Windows the
 shortcut target becomes `Discord.exe --processStart Discord.exe

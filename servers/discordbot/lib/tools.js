@@ -6,19 +6,23 @@
  * - discord_bot_post, discord_bot_edit: write
  *
  * What the bot may see and write is the permissions Discord grants its role,
- * set per channel in the guild settings
+ * set per channel in the guild settings; discord_bot_channels lists only the
+ * channels those permissions let it view
  *
  * The bot token stays in config.json and never reaches the model. Every write
  * goes out with allowed_mentions empty, so nothing written pings a member, a
  * role or everyone. No tool deletes anything
  *
- * A forum post opens a thread
+ * A forum post opens a thread. Messages render as in discorduser, one line
+ * each with names for ids, replies, files, stickers, embeds, polls, forwarded
+ * messages and reactions
  *
  * Every handler renders compact lines, an API failure becoming an error result
  * that carries the status and the body, 429 and its retry_after included
  */
 
 const { snowflake, request } = require('./api');
+const { author, message } = require('./render');
 const { textResult } = require('../../../core/tool-result');
 
 const config = require('../config.json').discordbot;
@@ -44,10 +48,16 @@ const TYPES = {
 const FORUM_TYPES = [15, 16];
 const THREAD_HOLDERS = [0, 5, 15, 16];
 const NO_MENTIONS = { parse: [] };
+const NOT_VIEWABLE = [403, 404];
 const ARCHIVED_PAGE = 100;
 const MESSAGES_PAGE = 50;
 const MESSAGES_MAX = 100;
 const DISCORD_EPOCH = 1420070400000n;
+const VIEW_CHANNEL = 1024n;
+const ADMINISTRATOR = 8n;
+const USER_MENTION = /<@!?(\d+)>/g;
+const ROLE_MENTION = /<@&\d+>/;
+const CHANNEL_LINK = /<#\d+>/;
 
 /**
  * Turn a handler into a tool, a thrown error becoming an error result and the
@@ -73,7 +83,8 @@ function tool(handler) {
 }
 
 /**
- * Call the API, a non 2xx status throwing with its status and body
+ * Call the API, a non 2xx status throwing an error that carries the status and
+ * the body
  * @param {string} method
  * @param {string} route
  * @param {{query?: object, body?: object}} [options]
@@ -83,7 +94,7 @@ async function call(method, route, options) {
 	const res = await request(method, route, options);
 	if (!res.ok) {
 		const body = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
-		throw new Error(`HTTP ${res.status} ${body}`);
+		throw Object.assign(new Error(`HTTP ${res.status} ${body}`), { status: res.status });
 	}
 	return res.data;
 }
@@ -103,8 +114,25 @@ function when(id) {
  * @param {string} id
  * @returns {Promise<object>}
  */
-function channel(id) {
-	return call('GET', `/channels/${snowflake(id, 'channel')}`);
+async function channel(id) {
+	const cid = snowflake(id, 'channel');
+	try {
+		return await call('GET', `/channels/${cid}`);
+	} catch (error) {
+		if (NOT_VIEWABLE.includes(error.status)) {
+			throw new Error(`Channel ${cid} not found or not viewable`);
+		}
+		throw error;
+	}
+}
+
+/**
+ * Names by id of a list of roles or channels
+ * @param {object[]} list
+ * @returns {Object<string, string>}
+ */
+function namesById(list) {
+	return Object.fromEntries(list.map((x) => [x.id, x.name]));
 }
 
 /**
@@ -157,24 +185,75 @@ function archivedThreads(ch, before) {
 }
 
 /**
- * Channels of every guild the bot is in, grouped under their category
+ * Channels the bot may view in every guild it is in, grouped under their
+ * category
  */
 async function channels() {
-	const guilds = await call('GET', '/users/@me/guilds');
+	const [me, guilds] = await Promise.all([
+		call('GET', '/users/@me'),
+		call('GET', '/users/@me/guilds')
+	]);
 	const blocks = [];
 	for (const g of guilds) {
-		blocks.push(`guild ${g.id} ${g.name}\n` + (await guildChannels(g.id)));
+		blocks.push(`guild ${g.id} ${g.name}\n` + (await guildChannels(g.id, me.id)));
 	}
 	return blocks.join('\n') || 'No guild';
 }
 
 /**
- * Channels of one guild, one line each, sorted by category then position
+ * The VIEW_CHANNEL test of a guild member, in Discord's order: the guild
+ * permissions of everyone and of the member's roles, administrator granting
+ * all, then the channel overwrites of everyone, of the member's roles together
+ * and of the member
+ * @param {string} gid
+ * @param {object} member Guild member, user and roles
+ * @param {object[]} roles Roles of the guild
+ * @returns {function(object): boolean}
+ */
+function viewer(gid, member, roles) {
+	const granted = Object.fromEntries(roles.map((r) => [r.id, BigInt(r.permissions)]));
+	const base = member.roles.reduce((p, id) => p | (granted[id] || 0n), granted[gid] || 0n);
+	if (base & ADMINISTRATOR) {
+		return () => true;
+	}
+	return (c) => {
+		const ow = Object.fromEntries((c.permission_overwrites || []).map((o) => [o.id, o]));
+		const apply = (p, allow, deny) => (p & ~deny) | allow;
+		let p = base;
+		if (ow[gid]) {
+			p = apply(p, BigInt(ow[gid].allow), BigInt(ow[gid].deny));
+		}
+		let allow = 0n;
+		let deny = 0n;
+		for (const id of member.roles) {
+			if (ow[id]) {
+				allow |= BigInt(ow[id].allow);
+				deny |= BigInt(ow[id].deny);
+			}
+		}
+		p = apply(p, allow, deny);
+		const own = ow[member.user.id];
+		if (own) {
+			p = apply(p, BigInt(own.allow), BigInt(own.deny));
+		}
+		return (p & VIEW_CHANNEL) !== 0n;
+	};
+}
+
+/**
+ * Channels of one guild the bot may view, one line each, sorted by category
+ * then position
  * @param {string} id
+ * @param {string} me Bot user id
  * @returns {Promise<string>}
  */
-async function guildChannels(id) {
-	const list = await call('GET', `/guilds/${id}/channels`);
+async function guildChannels(id, me) {
+	const [list, roles, member] = await Promise.all([
+		call('GET', `/guilds/${id}/channels`),
+		call('GET', `/guilds/${id}/roles`),
+		call('GET', `/guilds/${id}/members/${me}`)
+	]);
+	const canView = viewer(id, member, roles);
 	const byId = Object.fromEntries(list.map((c) => [c.id, c]));
 	const rank = (c) => {
 		const parent = byId[c.parent_id];
@@ -182,7 +261,7 @@ async function guildChannels(id) {
 	};
 
 	const lines = list
-		.filter((c) => c.type !== 4)
+		.filter((c) => c.type !== 4 && canView(c))
 		.sort((a, b) => {
 			const [pa, ca] = rank(a);
 			const [pb, cb] = rank(b);
@@ -230,23 +309,73 @@ async function threads({ channel: id, before }) {
 }
 
 /**
- * Messages of a channel or thread, oldest first, the newest page by default
- * @param {{channel: string, before?: string, limit?: number}} args
+ * Name of a user, or null when the id names no user the bot can look up
+ * @param {string} id
+ * @returns {Promise<string|null>}
  */
-async function read({ channel: id, before, limit = MESSAGES_PAGE }) {
+async function userName(id) {
+	try {
+		return author(await call('GET', `/users/${id}`));
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Names a page of messages needs beyond what each message carries: every user
+ * the page pings, the users it mentions without pinging them, and the roles
+ * and channels of the guild when the page holds a role mention or a channel
+ * link
+ * @param {string} gid
+ * @param {object[]} messages
+ * @returns {Promise<{users: object, roles: object, channels: object}>}
+ */
+async function pageNames(gid, messages) {
+	const raw = JSON.stringify(messages);
+	const users = {};
+	for (const u of messages.flatMap((m) => m.mentions || [])) {
+		users[u.id] = author(u);
+	}
+	const missing = [...new Set([...raw.matchAll(USER_MENTION)].map((x) => x[1]))].filter(
+		(id) => !users[id]
+	);
+	const [found, roles, channels] = await Promise.all([
+		Promise.all(missing.map(async (id) => [id, await userName(id)])),
+		gid && ROLE_MENTION.test(raw) ? call('GET', `/guilds/${gid}/roles`) : [],
+		gid && CHANNEL_LINK.test(raw) ? call('GET', `/guilds/${gid}/channels`) : []
+	]);
+	for (const [id, name] of found) {
+		if (name) {
+			users[id] = name;
+		}
+	}
+	return { users, roles: namesById(roles), channels: namesById(channels) };
+}
+
+/**
+ * One page of messages of a channel or thread, oldest first, the newest page
+ * by default
+ * @param {{channel: string, after?: string, before?: string, limit?: number}} args
+ */
+async function read({ channel: id, after, before, limit = MESSAGES_PAGE }) {
 	const ch = await channel(id);
+	const from = after == null ? null : snowflake(after, 'after');
+	const to = before == null ? null : snowflake(before, 'before');
 	const count = Math.min(Math.max(Math.trunc(Number(limit)) || MESSAGES_PAGE, 1), MESSAGES_MAX);
 	const messages = await call('GET', `/channels/${ch.id}/messages`, {
-		query: { limit: count, before: before == null ? undefined : snowflake(before, 'before') }
+		query: { limit: count, after: from, before: from == null ? to : null }
 	});
 
-	const lines = messages.reverse().map((m) => {
-		const files = (m.attachments || []).map((a) => ` [file ${a.filename}]`).join('');
-		const embeds = m.embeds && m.embeds.length ? ` [${m.embeds.length} embeds]` : '';
-		return `${m.id} ${when(m.id)} ${m.author.username}: ${m.content}${files}${embeds}`;
-	});
+	const page = Object.fromEntries(messages.map((m) => [m.id, m]));
+	const names = await pageNames(ch.guild_id, messages);
+	const ordered = messages.slice().reverse();
+	const lines = ordered.map((m) => message(m, page, names));
 	if (messages.length === count) {
-		lines.push(`more: before=${messages[0].id}`);
+		lines.push(
+			from != null
+				? `more: after=${ordered[ordered.length - 1].id}`
+				: `more: before=${ordered[0].id}`
+		);
 	}
 	return lines.join('\n') || `No message in #${ch.name}`;
 }
@@ -256,6 +385,9 @@ async function read({ channel: id, before, limit = MESSAGES_PAGE }) {
  * @param {{channel: string, content: string, reply_to?: string, thread_name?: string, tags?: string[]}} args
  */
 async function post({ channel: id, content, reply_to, thread_name, tags }) {
+	if (tags != null && (!Array.isArray(tags) || tags.some((t) => typeof t !== 'string'))) {
+		throw new Error('Tags argument is not a list of names');
+	}
 	const ch = await channel(id);
 
 	if (!FORUM_TYPES.includes(ch.type)) {
@@ -270,14 +402,11 @@ async function post({ channel: id, content, reply_to, thread_name, tags }) {
 		return `Message ${m.id} posted in #${ch.name}`;
 	}
 
-	if (!thread_name) {
+	if (thread_name == null) {
 		throw new Error(`Thread_name argument required, #${ch.name} is a forum`);
 	}
 	if (reply_to != null) {
 		throw new Error('Reply_to does not apply to a forum, it opens a thread');
-	}
-	if (tags != null && !Array.isArray(tags)) {
-		throw new Error('Tags argument is not a list');
 	}
 	const ids = Object.fromEntries((ch.available_tags || []).map((tag) => [tag.name, tag.id]));
 	const applied = (tags || []).map((name) => {

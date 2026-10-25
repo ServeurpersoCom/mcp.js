@@ -70,7 +70,8 @@ function optional(value, what) {
 
 /**
  * Evaluate one snippet in the client page and return its text, through a
- * forward opened for this call when the port is remote
+ * forward opened for this call when the port is remote; the error a snippet
+ * resolves to is thrown with its message
  * @param {string} expression
  * @returns {Promise<string>}
  */
@@ -78,6 +79,9 @@ function run(expression) {
 	return withEndpoint(config, async (origin) => {
 		const page = await pageTarget(origin, PAGE_URL, config.timeoutMs);
 		const value = await evaluate(page.webSocketDebuggerUrl, expression, config.timeoutMs);
+		if (value && value.error != null) {
+			throw new Error(value.error);
+		}
 		return value == null ? '' : String(value);
 	});
 }
