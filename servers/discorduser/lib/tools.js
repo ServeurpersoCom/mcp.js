@@ -5,7 +5,8 @@
  *
  * - discord_user_guilds: the direct messages as @me, then the servers in the
  *   order of the account's guild bar
- * - discord_user_unread: the unread conversations, with unread and mention counts
+ * - discord_user_unread: what the client shows as unread, one line per server,
+ *   or the unread channels of one server
  * - discord_user_channels: the viewable channels of a guild under their
  *   categories, or the direct messages for @me
  * - discord_user_threads: the threads of a forum or text channel
@@ -158,11 +159,13 @@ function guilds() {
 }
 
 /**
- * The unread conversations, direct messages first, with unread and mention
- * counts
+ * The unread direct messages and a line per server counting its unread
+ * channels and mentions, or the unread channels of one guild or of @me
+ * @param {{guild?: string}} args
  */
-function unread() {
-	return run(snippets.UNREAD);
+function unread({ guild }) {
+	const id = guild == null ? null : guild === DM_GUILD ? DM_GUILD : snowflake(guild, 'guild');
+	return run(snippets.unread(id == null ? 'null' : JSON.stringify(id)));
 }
 
 /**

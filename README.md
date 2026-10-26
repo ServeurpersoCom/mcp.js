@@ -276,8 +276,8 @@ and Add Reactions, plus Manage Threads for the threads it did not open.
 
 Your own Discord account, through the client you already run:
 `discord_user_guilds` (your direct messages as `@me`, then your servers in
-guild bar order), `discord_user_unread` (the conversations with unread messages
-and their mention counts), `discord_user_channels` (the channels of a server
+guild bar order), `discord_user_unread` (per server, its unread channels and
+mentions, or the unread channels of one server), `discord_user_channels` (the channels of a server
 you may view, under their categories, or your direct messages for `@me`),
 `discord_user_threads` (a forum or text channel's threads), `discord_user_read`
 (messages, oldest first, `after` for what came since a message, `around` for

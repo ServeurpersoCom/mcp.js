@@ -306,38 +306,51 @@ function channels(guild) {
 }
 
 /**
- * The unread conversations and viewable channels, with unread and mention
- * counts, direct messages first
+ * What the client shows as unread, the account's own read state for reference:
+ * the direct messages with a badge and one line per server counting its unread
+ * channels and mentions, or for a guild its unread channels, the message count
+ * given when the client holds the channel's messages
+ * @param {string} guild Guild id, @me or the literal null, JSON encoded by the caller
  */
-const UNREAD = expr(`
+function unread(guild) {
+	return expr(`
+	const gid = ${guild};
 	const RS = __store('ReadStateStore');
+	const GRS = __store('GuildReadStateStore');
 	const CH = __store('ChannelStore');
 	const GC = __store('GuildChannelStore');
 	const G = __store('GuildStore');
-	const line = (id, label) => {
-		if (!RS.hasUnread(id)) return null;
-		const count = RS.getUnreadCount(id);
-		const mentions = RS.getMentionCount(id);
-		if (!count && !mentions) return null;
-		return '  ' + id + ' ' + label + ' | ' + count + ' unread' + (mentions ? ' | ' + mentions + ' mentions' : '');
+	const isUnread = (c) => {
+		if (!RS.hasUnread(c.id) || (c.guild_id && !__canView(c))) return false;
+		return RS.getMentionCount(c.id) > 0 || (c.guild_id != null && GRS.shouldCountChannelUnread(c));
 	};
-	const blocks = [];
-	const dms = CH.getSortedPrivateChannels().map((c) => line(c.id, __dmName(c))).filter(Boolean);
-	if (dms.length) blocks.push('@me Direct messages\\n' + dms.join('\\n'));
-	for (const gid of __store('SortedGuildStore').getFlattenedGuildIds()) {
+	const line = (c, label) => {
+		const count = RS.getUnreadCount(c.id);
+		const mentions = RS.getMentionCount(c.id);
+		return '  ' + c.id + ' ' + label + ' | ' + (count ? count + ' unread' : 'unread') + (mentions ? ' | ' + mentions + ' mentions' : '');
+	};
+	const unreadIn = (id) => GC.getSelectableChannelIds(id).map((cid) => CH.getChannel(cid)).filter((c) => c && isUnread(c));
+	const dms = CH.getSortedPrivateChannels().filter(isUnread).map((c) => line(c, __dmName(c)));
+	if (gid === '@me') return 'Direct messages\\n' + (dms.join('\\n') || 'Nothing unread');
+	if (gid != null) {
 		const g = G.getGuild(gid);
+		if (!g) throw new Error('Guild ' + gid + ' not found, the account is not in it');
+		const lines = unreadIn(gid).map((c) => line(c, '#' + c.name));
+		return 'guild ' + g.id + ' ' + g.name + '\\n' + (lines.join('\\n') || 'Nothing unread');
+	}
+	const blocks = [];
+	if (dms.length) blocks.push('@me Direct messages\\n' + dms.join('\\n'));
+	for (const id of __store('SortedGuildStore').getFlattenedGuildIds()) {
+		const g = G.getGuild(id);
 		if (!g) continue;
-		const lines = [];
-		for (const id of GC.getSelectableChannelIds(gid)) {
-			const c = CH.getChannel(id);
-			if (!c || !__canView(c)) continue;
-			const l = line(id, '#' + c.name);
-			if (l) lines.push(l);
-		}
-		if (lines.length) blocks.push(g.id + ' ' + g.name + '\\n' + lines.join('\\n'));
+		const chans = unreadIn(id);
+		if (!chans.length) continue;
+		const mentions = chans.reduce((n, c) => n + RS.getMentionCount(c.id), 0);
+		blocks.push(g.id + ' ' + g.name + ' | ' + chans.length + (chans.length === 1 ? ' channel' : ' channels') + ' unread' + (mentions ? ' | ' + mentions + ' mentions' : ''));
 	}
 	return blocks.join('\\n') || 'Nothing unread';
 `);
+}
 
 /**
  * The active and archived threads of a channel
@@ -538,4 +551,4 @@ function search(guild, query, page) {
 `);
 }
 
-module.exports = { GUILDS, UNREAD, channels, threads, read, post, edit, react, editThread, search };
+module.exports = { GUILDS, unread, channels, threads, read, post, edit, react, editThread, search };

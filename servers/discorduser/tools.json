@@ -17,9 +17,15 @@
 		"type": "function",
 		"function": {
 			"name": "discord_user_unread",
-			"description": "The conversations with unread messages, direct messages first then by server, each with its unread count and its mention count. The reference is the account's own read state, so this is what is new since it last read each conversation.",
+			"description": "What the client shows as unread, the reference being the account's own read state, so what is new since it last read each conversation. Without guild: the direct messages with unread messages, then one line per server with its number of unread channels and its mention count. With a guild: its unread channels, each with its unread count when the client holds it and its mention count; @me gives the direct messages.",
 			"parameters": {
-				"properties": {},
+				"properties": {
+					"guild": {
+						"title": "Server id to list its unread channels, or @me for the direct messages",
+						"type": "string",
+						"minLength": 1
+					}
+				},
 				"required": [],
 				"title": "DiscordUserUnreadInput",
 				"type": "object",
