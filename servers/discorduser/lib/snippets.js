@@ -46,10 +46,7 @@ let __http = null;
 				const name = typeof v.getName === 'function' && v.constructor && v.constructor.displayName ? v.getName() : null;
 				if (name && !__stores[name]) __stores[name] = v;
 			} catch {}
-			if (!__http) {
-				const keys = Object.keys(v);
-				if (keys.length === 5 && ['get', 'post', 'put', 'patch', 'del'].every((k) => typeof v[k] === 'function')) __http = v;
-			}
+			if (!__http && Object.keys(v).sort().join() === 'del,get,patch,post,put') __http = v;
 		}
 	}
 }
@@ -399,7 +396,6 @@ function read(channel, after, around, before, limit) {
 	else if (around != null) query.around = around;
 	else if (before != null) query.before = before;
 	const messages = await __get('/channels/' + cid + '/messages', query);
-	if (!Array.isArray(messages)) throw new Error('No message list for ' + __label(ch) + ', the client answered ' + JSON.stringify(messages));
 	const ordered = messages.slice().reverse();
 	const page = {};
 	for (const m of messages) page[m.id] = m;
