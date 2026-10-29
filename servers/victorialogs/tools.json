@@ -1,0 +1,26 @@
+[
+	{
+		"type": "function",
+		"function": {
+			"name": "victorialogs_query",
+			"description": "Run one LogsQL query on VictoriaLogs and read its rows, one per line. A log entry reads as its time, its stream values, its level and its message; the output of a pipe (stats, top, field_names, field_values, fields) reads as key=value pairs. Start with a time filter like _time:1h, add words or \"phrases\" of the message, or field:value filters on other fields, then pipes: | sort by (_time), | stats by (field) count() n, | stats by (_time:10m) count() n, | top 10 by (field), | field_names, | field_values field, | fields a, b. Rows come unordered unless sorted.",
+			"parameters": {
+				"properties": {
+					"query": {
+						"title": "LogsQL query, starting with a time filter like _time:1h",
+						"type": "string",
+						"minLength": 1
+					},
+					"limit": {
+						"title": "Maximum number of rows, 100 by default, 1000 at most",
+						"type": "integer"
+					}
+				},
+				"required": ["query"],
+				"title": "VictorialogsQueryInput",
+				"type": "object",
+				"additionalProperties": false
+			}
+		}
+	}
+]

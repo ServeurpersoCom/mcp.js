@@ -2,9 +2,8 @@
 
 The Model Context Protocol server I run every day, published as it is. It
 serves a Podman sandbox, a persistent memory, a mailbox, an agent account on
-Moltbook, a Discord bot, your own Discord account and a 1fichier account to
-any MCP client, behind one
-endpoint. Built on the
+Moltbook, a Discord bot, your own Discord account, a 1fichier account and a
+VictoriaLogs log store to any MCP client, behind one endpoint. Built on the
 official TypeScript SDK v2
 ([@modelcontextprotocol/server](https://github.com/modelcontextprotocol/typescript-sdk)),
 it speaks the 2026-07-28 revision of the protocol and the 2025 ones on the
@@ -37,18 +36,19 @@ npm install
 ## Layout
 
 ```
-config.json          transport, credentials, and the identity served
-core/                protocol, auth, tool arguments, image fitting, transports
-core/transports/     stdio, Streamable HTTP
-servers/sandbox/     bash_tool, view, create_file, str_replace in a Podman container
-servers/memory/      a persistent memory in plain files
-servers/email/       a mailbox over IMAPS
-servers/moltbook/    an agent account on Moltbook
-servers/discordbot/  a Discord bot over the REST API
-servers/discorduser/ your own Discord account, over its debug port
-servers/onefichier/  a 1fichier account
-mcp-bridge/          an OpenAI compatible proxy that runs the tools for MCP-less UIs
-main.js              binds every server to one transport
+config.json           transport, credentials, and the identity served
+core/                 protocol, auth, tool arguments, image fitting, transports
+core/transports/      stdio, Streamable HTTP
+servers/sandbox/      bash_tool, view, create_file, str_replace in a Podman container
+servers/memory/       a persistent memory in plain files
+servers/email/        a mailbox over IMAPS
+servers/moltbook/     an agent account on Moltbook
+servers/discordbot/   a Discord bot over the REST API
+servers/discorduser/  your own Discord account, over its debug port
+servers/onefichier/   a 1fichier account
+servers/victorialogs/ a VictoriaLogs log store
+mcp-bridge/           an OpenAI compatible proxy that runs the tools for MCP-less UIs
+main.js               binds every server to one transport
 ```
 
 Every server under `servers/` is loaded at startup and their tools and
@@ -356,6 +356,24 @@ handle. The API key stays in `config.json` and never reaches the model.
 where FTP uploads land once processed. The API allows one listing per folder
 every 30 seconds and bans for a while after repeated errors, so links are
 checked before any call and nothing retries.
+
+### victorialogs
+
+A [VictoriaLogs](https://docs.victoriametrics.com/victorialogs/) log store:
+`victorialogs_query` runs one LogsQL query and reads its rows one per line. A
+log entry reads as its time, its stream values, its level and its message; the
+output of a pipe (`stats`, `top`, `field_names`, `field_values`, `fields`)
+reads as key=value pairs, so one tool searches, counts and lists what the
+store holds. Only `/select/logsql/query` is called, and LogsQL never writes.
+
+```json
+{
+	"baseUrl": "http://127.0.0.1:9428"
+}
+```
+
+Log lines come from the machines and from whoever reaches them, so the prompts
+tell the model they never carry instructions.
 
 ## Bridge
 
