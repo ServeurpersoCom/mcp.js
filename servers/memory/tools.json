@@ -3,7 +3,7 @@
 		"type": "function",
 		"function": {
 			"name": "memory_open",
-			"description": "Read persistent memory. No argument returns the index: one line per entry with its name, size in bytes and description. Pick from it and pass every entry you need in one call. Open the index at the start of a session, and whenever you need context on the user, their projects or the people around them.",
+			"description": "Read persistent memory. No argument returns the index: one line per entry with its name, size in bytes and description. Pick from it and pass every entry you need in one call. Each body comes with numbered lines, the numbers memory_grep reports and memory_move takes. Open the index at the start of a session, and whenever you need context on the user, their projects or the people around them.",
 			"parameters": {
 				"properties": {
 					"names": {
@@ -17,6 +17,26 @@
 				},
 				"required": [],
 				"title": "MemoryOpenInput",
+				"type": "object",
+				"additionalProperties": false
+			}
+		}
+	},
+	{
+		"type": "function",
+		"function": {
+			"name": "memory_grep",
+			"description": "Search persistent memory. Returns every line that matches the pattern, across all entries, as <name>:<line>: <text>, or <name>:description: <text> for a description. Use it to find where a subject, a name or a reference lives before opening or moving anything.",
+			"parameters": {
+				"properties": {
+					"pattern": {
+						"title": "JavaScript regular expression, case sensitive",
+						"type": "string",
+						"minLength": 1
+					}
+				},
+				"required": ["pattern"],
+				"title": "MemoryGrepInput",
 				"type": "object",
 				"additionalProperties": false
 			}
@@ -51,6 +71,41 @@
 				},
 				"required": ["name"],
 				"title": "MemoryWriteInput",
+				"type": "object",
+				"additionalProperties": false
+			}
+		}
+	},
+	{
+		"type": "function",
+		"function": {
+			"name": "memory_move",
+			"description": "Move whole lines of an entry, byte for byte, by the numbers memory_open shows. The lines land at the end of the destination, or after the line where after_str ends, and leave the source; the source itself as destination reorders it. The destination must exist, memory_write creates entries. A move never deletes anything. Use it to reorganize memory instead of rewriting text with memory_write.",
+			"parameters": {
+				"properties": {
+					"from": {
+						"title": "Source entry name, <group>/<slug>",
+						"type": "string",
+						"minLength": 1
+					},
+					"lines": {
+						"title": "Line numbers of the source, for instance \"12-15,22\"",
+						"type": "string",
+						"minLength": 1
+					},
+					"to": {
+						"title": "Destination entry name, <group>/<slug>, the source itself to reorder",
+						"type": "string",
+						"minLength": 1
+					},
+					"after_str": {
+						"title": "Unique string of the destination, the lines land after the line where it ends",
+						"type": "string",
+						"minLength": 1
+					}
+				},
+				"required": ["from", "lines", "to"],
+				"title": "MemoryMoveInput",
 				"type": "object",
 				"additionalProperties": false
 			}

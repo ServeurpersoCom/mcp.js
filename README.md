@@ -210,9 +210,11 @@ than mangled.
 
 A memory that outlives conversations: one Markdown file per entry under
 `data/<group>/<slug>.md`, an index of one line per entry. `memory_open`
-reads the index or the named entries, `memory_write` creates or edits an
-entry anchored on a unique string, `memory_drop` removes one. Every write
-goes to a temporary file then a rename.
+reads the index or the named entries with numbered lines, `memory_grep`
+finds the matching lines across all entries, `memory_write` creates or edits
+an entry anchored on a unique string, `memory_move` moves whole lines by
+number so reorganized text stays byte identical and nothing is ever deleted
+by a move, `memory_drop` removes one. Every write goes to a temporary file then a rename.
 
 ### email
 
