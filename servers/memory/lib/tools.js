@@ -28,7 +28,6 @@ const GREP_MATCH_LIMIT = 200;
 const GREP_LINE_CHARS = 240;
 const GREP_LEAD_CHARS = 80;
 const ELLIPSIS = '...';
-const PREVIEW_CHARS = 60;
 
 const TOOLS_DEFINITIONS = require('../tools.json').map((tool) => ({
 	name: tool.function.name,
@@ -81,6 +80,26 @@ function parseLines(spec, total) {
 	}
 
 	return [...picked].sort((a, b) => a - b);
+}
+
+/**
+ * Write sorted line numbers back as a selection such as "12-15,22"
+ * @param {number[]} numbers - Sorted 1-based line numbers, each once
+ * @returns {string}
+ */
+function formatLines(numbers) {
+	const parts = [];
+	let first = numbers[0];
+
+	for (let idx = 1; idx <= numbers.length; idx++) {
+		if (numbers[idx] !== numbers[idx - 1] + 1) {
+			const last = numbers[idx - 1];
+			parts.push(first === last ? `${first}` : `${first}-${last}`);
+			first = numbers[idx];
+		}
+	}
+
+	return parts.join(',');
 }
 
 /**
@@ -358,15 +377,12 @@ function tool_memory_move(args) {
 		return textResult(`${error.message}, ${done}`, true);
 	}
 
-	const preview = picked
-		.map(
-			(n, idx) =>
-				`${n}\t${moved[idx].slice(0, PREVIEW_CHARS)}${moved[idx].length > PREVIEW_CHARS ? ELLIPSIS : ''}`
-		)
-		.join('\n');
-	const lines = stored.map((entry) => store.line(entry)).join('\n');
 	const count = `${picked.length} ${picked.length === 1 ? 'line' : 'lines'}`;
-	return textResult(`Moved ${count} from ${from} to ${to}\n${preview}\n${lines}`);
+	const landed = formatLines(moved.map((_, idx) => at + idx + 1));
+	const lines = stored.map((entry) => store.line(entry)).join('\n');
+	return textResult(
+		`Moved ${count} from ${from} (${formatLines(picked)}) to ${to} (now ${landed})\n${lines}`
+	);
 }
 
 /**
