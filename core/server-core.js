@@ -42,18 +42,19 @@ function contentBlock(result) {
 }
 
 /**
- * What a handler shows of its output while it runs: each text goes to the
- * client as the next partial result of the call when its request asks for
- * them, nowhere otherwise; the result the handler returns stays whole
+ * What a handler shows of its output while it runs, when the request asks for
+ * partial results: each text goes to the client as the next partial result of
+ * the call; none when it asks nothing, so the handler streams nothing; the
+ * result the handler returns stays whole
  * @param {object} request The tools/call request
  * @param {object} ctx Its context
- * @returns {function(string): void}
+ * @returns {function(string): void | undefined}
  */
 function partials(request, ctx) {
 	const token = request.params._meta?.partialResultToken;
 	const capabilities = ctx.mcpReq.envelope?.[CAPABILITIES_META];
 	if (token === undefined || !capabilities?.partialResults) {
-		return () => {};
+		return undefined;
 	}
 	let seq = 0;
 	return (text) => {

@@ -202,11 +202,11 @@ that fits as it is when lighter than its JPEG, any other as a JPEG within
 (sharp); one over `maxMegapixels` is never decoded. Long output keeps its head and
 its tail with the hidden bytes counted. A call whose `_meta` names a
 `partialResultToken`, from a client that declares `partialResults`, gets the
-lines of the head of `bash_tool` as they come, each in a
-`notifications/tools/partial_result`; its result stays whole. A call its
-client cancels ends inside the container, every process it started with it.
-Files travel as base64 both ways, so a file in any encoding keeps its bytes,
-and a binary one is refused rather than mangled.
+lines of `bash_tool` as they come, up to `shownLimitBytes`, each in a
+`notifications/tools/partial_result`; its result keeps `outputLimitBytes`.
+A call its client cancels ends inside the container, every process it
+started with it. Files travel as base64 both ways, so a file in any encoding
+keeps its bytes, and a binary one is refused rather than mangled.
 
 `sandbox-manager.js` drives the pod: `build`, `destroy`, `start`, `stop`,
 `reset` (a fresh container from the existing image), `status`, `logs`,

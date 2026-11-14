@@ -12,7 +12,8 @@
  * the command emits: the head holds the first half of the cap, a ring of
  * chunks the last half. The truncated flag and the true byte total let the
  * caller report the bytes hidden between them or refuse an incomplete payload.
- * The head also goes to the caller as it comes, line by line. Every process
+ * The whole output also goes to the caller as it comes, line by line, up to
+ * shownLimitBytes, for a client to show while the call runs. Every process
  * of a call carries a variable naming it, so a call its client cancels ends
  * inside the container, its whole tree with it
  *
@@ -22,6 +23,7 @@
  * - podman.containerName: Name of the container (inside pod)
  * - podman.containerUser: User inside container for command execution
  * - podman.outputLimitBytes: Output kept for the model (bytes)
+ * - podman.shownLimitBytes: Output shown while a call runs (bytes)
  * - podman.timeout: Command execution timeout in seconds
  *
  * Security model:
@@ -37,6 +39,46 @@ const config = require('../config.json');
 
 // The byte a line of output ends with
 const NEWLINE = 0x0a;
+
+// The line that ends what a call shows while it runs once it shows
+// shownLimitBytes, the rest showing once the call ends
+const OUTPUT_SHOWN = 'The rest of the output shows once the call ends\n';
+
+/**
+ * The whole lines of an output as they come, for whoever shows it while it
+ * runs: at most max bytes of them, then OUTPUT_SHOWN, then nothing
+ * @param {number} max Bytes shown at most
+ * @param {function(string): void} give Takes the lines each chunk completes
+ * @returns {function(Buffer): void} Takes each chunk of the output
+ */
+function shownLines(max, give) {
+	let pending = Buffer.alloc(0);
+	let shown = 0;
+	let full = false;
+	return (data) => {
+		if (full) {
+			return;
+		}
+		pending = Buffer.concat([pending, data]);
+		const room = max - shown;
+		const end = pending.lastIndexOf(NEWLINE);
+		// The whole lines that fit, the line that ends the show when the rest
+		// does not: a line past the room, or one still open that already fills it
+		const fits =
+			end < 0 ? -1 : end < room ? end : room === 0 ? -1 : pending.lastIndexOf(NEWLINE, room - 1);
+		let out = fits < 0 ? '' : pending.subarray(0, fits + 1).toString();
+		shown += fits + 1;
+		pending = pending.subarray(fits + 1);
+		if ((end >= 0 && fits !== end) || pending.length > max - shown) {
+			full = true;
+			pending = Buffer.alloc(0);
+			out += OUTPUT_SHOWN;
+		}
+		if (out) {
+			give(out);
+		}
+	};
+}
 
 // The variable every process of a call inherits, its value naming the call
 const CALL_VARIABLE = 'MCP_CALL';
@@ -65,7 +107,7 @@ const fullContainerName = `${config.podman.podName}-${config.podman.containerNam
  * Execute command in Podman container
  * @param {string} script Bash script to execute
  * @param {number} [capBytes] Output bytes kept, head and tail, defaults to the output limit
- * @param {function(string): void} [partial] Takes the whole lines of the head as they come
+ * @param {function(string): void} [partial] Takes the whole lines of the output as they come, none for a call that streams nothing
  * @param {AbortSignal} [signal] Ends the command and every process it started,
  * one aborted already starting nothing
  * @returns {Promise<{head: Buffer, tail: Buffer, total: number, truncated: boolean, exitCode: number}>}
@@ -73,7 +115,7 @@ const fullContainerName = `${config.podman.podName}-${config.podman.containerNam
 async function podmanExec(
 	script,
 	capBytes = config.podman.outputLimitBytes,
-	partial = () => {},
+	partial = undefined,
 	signal = undefined
 ) {
 	signal?.throwIfAborted();
@@ -98,8 +140,7 @@ async function podmanExec(
 		const tailMax = capBytes - headMax;
 		const head = [];
 		let headBytes = 0;
-		// The bytes of the head after its last line given to partial
-		let unsaid = Buffer.alloc(0);
+		const show = partial && shownLines(config.podman.shownLimitBytes, partial);
 		const chunks = [];
 		let kept = 0;
 		let total = 0;
@@ -107,17 +148,12 @@ async function podmanExec(
 		// The first headMax bytes go to the head, the rest to a ring of chunks
 		// that drops its oldest ones once it holds tailMax bytes without them
 		const collect = (data) => {
+			show?.(data);
 			total += data.length;
 			const take = Math.min(data.length, headMax - headBytes);
 			if (take > 0) {
 				head.push(data.subarray(0, take));
 				headBytes += take;
-				unsaid = Buffer.concat([unsaid, data.subarray(0, take)]);
-				const end = unsaid.lastIndexOf(NEWLINE);
-				if (end >= 0) {
-					partial(unsaid.subarray(0, end + 1).toString());
-					unsaid = unsaid.subarray(end + 1);
-				}
 				data = data.subarray(take);
 			}
 			if (data.length === 0) {

@@ -39,6 +39,7 @@
 		"containerUser": "root",
 		"timeout": 300,
 		"outputLimitBytes": 65536,
+		"shownLimitBytes": 4194304,
 		"fileLimitBytes": 33554432,
 		"maxMegapixels": 100,
 		"maxDimension": 1920,
