@@ -66,7 +66,8 @@ const fullContainerName = `${config.podman.podName}-${config.podman.containerNam
  * @param {string} script Bash script to execute
  * @param {number} [capBytes] Output bytes kept, head and tail, defaults to the output limit
  * @param {function(string): void} [partial] Takes the whole lines of the head as they come
- * @param {AbortSignal} [signal] Ends the command and every process it started
+ * @param {AbortSignal} [signal] Ends the command and every process it started,
+ * one aborted already starting nothing
  * @returns {Promise<{head: Buffer, tail: Buffer, total: number, truncated: boolean, exitCode: number}>}
  */
 async function podmanExec(
@@ -75,6 +76,7 @@ async function podmanExec(
 	partial = () => {},
 	signal = undefined
 ) {
+	signal?.throwIfAborted();
 	return new Promise((resolve) => {
 		// The inner bash reads the script from its stdin, exec collapses the wrapper
 		const call = randomUUID();
