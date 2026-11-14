@@ -4,7 +4,8 @@
  *
  * - memory_open: read the index, or the full body of the named entries with
  *   numbered lines
- * - memory_grep: find the lines that match a pattern across every entry
+ * - memory_grep: find the lines that match a pattern across every entry,
+ *   grouped by entry, the densest first
  * - memory_write: create an entry, edit its body, refresh its description
  * - memory_move: move whole lines between entries or within one, never deleting
  * - memory_drop: remove an entry
@@ -24,7 +25,10 @@
 const store = require('./store');
 const { textResult } = require('../../../core/tool-result');
 
+const GREP_FLAGS = 'i';
 const GREP_MATCH_LIMIT = 200;
+const GREP_ENTRY_LIMIT = 5;
+const GREP_DESCRIPTION = 'description';
 const GREP_LINE_CHARS = 240;
 const GREP_LEAD_CHARS = 80;
 const ELLIPSIS = '...';
@@ -170,47 +174,87 @@ function tool_memory_open(args) {
 }
 
 /**
+ * Count a quantity with its noun
+ * @param {number} n
+ * @param {string} one
+ * @param {string} many
+ * @returns {string}
+ */
+function counted(n, one, many) {
+	return `${n} ${n === 1 ? one : many}`;
+}
+
+/**
  * Find the lines that match a pattern across every entry, descriptions included
+ * Matches come grouped by entry under a header shaped like the one of
+ * memory_open, the entries with the most matches first, each entry showing at
+ * most GREP_ENTRY_LIMIT lines so that no entry is crowded out of the result
  * @param {{pattern: string}} args
  * @returns {object}
  */
 function tool_memory_grep(args) {
 	let regex;
 	try {
-		regex = new RegExp(String(args.pattern ?? ''));
+		regex = new RegExp(String(args.pattern ?? ''), GREP_FLAGS);
 	} catch (error) {
 		return textResult(`Invalid pattern: ${error.message}`, true);
 	}
 
-	const found = [];
-	let total = 0;
+	const hits = [];
 
 	for (const name of store.list()) {
 		const entry = store.read(name);
 		if (!entry) {
 			continue;
 		}
-		const rows = [['description', entry.description]].concat(
-			bodyLines(entry.body).map((text, idx) => [String(idx + 1), text])
+		const lines = bodyLines(entry.body);
+		const rows = [[GREP_DESCRIPTION, entry.description]].concat(
+			lines.map((text, idx) => [String(idx + 1), text])
 		);
+		const matches = [];
 		for (const [where, text] of rows) {
 			const match = regex.exec(text);
-			if (!match) {
-				continue;
+			if (match) {
+				matches.push(`${where}\t${clip(text, match.index)}`);
 			}
-			total++;
-			if (found.length < GREP_MATCH_LIMIT) {
-				found.push(`${name}:${where}: ${clip(text, match.index)}`);
-			}
+		}
+		if (matches.length > 0) {
+			hits.push({ entry, lines: lines.length, matches });
 		}
 	}
 
-	if (total === 0) {
+	if (hits.length === 0) {
 		return textResult('No match');
 	}
-	const more =
-		total > found.length ? `\n${total - found.length} more matches, narrow the pattern` : '';
-	return textResult(`${found.join('\n')}${more}`);
+
+	hits.sort(
+		(a, b) => b.matches.length - a.matches.length || a.entry.name.localeCompare(b.entry.name)
+	);
+
+	const out = [];
+	let shown = 0;
+	let left = 0;
+
+	for (const { entry, lines, matches } of hits) {
+		const room = Math.min(GREP_ENTRY_LIMIT, GREP_MATCH_LIMIT - shown);
+		if (room <= 0) {
+			left++;
+			continue;
+		}
+		out.push(
+			`[${entry.name}] [updated: ${entry.updated}] [lines: ${lines}] [size: ${entry.bytes} bytes]`,
+			...matches.slice(0, room)
+		);
+		shown += Math.min(room, matches.length);
+		if (matches.length > room) {
+			out.push(`+${counted(matches.length - room, 'more line', 'more lines')}`);
+		}
+	}
+
+	if (left > 0) {
+		out.push(`${counted(left, 'more entry matches', 'more entries match')}, narrow the pattern`);
+	}
+	return textResult(out.join('\n'));
 }
 
 /**
@@ -377,7 +421,7 @@ function tool_memory_move(args) {
 		return textResult(`${error.message}, ${done}`, true);
 	}
 
-	const count = `${picked.length} ${picked.length === 1 ? 'line' : 'lines'}`;
+	const count = counted(picked.length, 'line', 'lines');
 	const landed = formatLines(moved.map((_, idx) => at + idx + 1));
 	const lines = stored.map((entry) => store.line(entry)).join('\n');
 	return textResult(

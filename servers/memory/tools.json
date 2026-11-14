@@ -26,11 +26,11 @@
 		"type": "function",
 		"function": {
 			"name": "memory_grep",
-			"description": "Search persistent memory. Returns every line that matches the pattern, across all entries, as <name>:<line>: <text>, or <name>:description: <text> for a description. Use it to find where a subject, a name or a reference lives before opening or moving anything.",
+			"description": "Search persistent memory, case insensitive. Returns the matching lines grouped by entry, the entries with the most matches first, each under a header like the one of memory_open, each line numbered as memory_open shows it and cut around its match. A line points to a fact, it does not settle it: an entry is written in order and a later line may correct an earlier one. When matches bear on the task at hand, open the most relevant entries and read them whole before relying on them. To read about a subject, open its entries from the index rather than reading it through grep. Use it to locate a subject, a name or a reference, and to find the lines memory_move takes.",
 			"parameters": {
 				"properties": {
 					"pattern": {
-						"title": "JavaScript regular expression, case sensitive",
+						"title": "JavaScript regular expression, case insensitive",
 						"type": "string",
 						"minLength": 1
 					}
