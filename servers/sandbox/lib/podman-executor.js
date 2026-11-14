@@ -11,7 +11,10 @@
  * tail bounded by the caller supplied cap, so memory stays flat however much
  * the command emits: the head holds the first half of the cap, a ring of
  * chunks the last half. The truncated flag and the true byte total let the
- * caller report the bytes hidden between them or refuse an incomplete payload
+ * caller report the bytes hidden between them or refuse an incomplete payload.
+ * The head also goes to the caller as it comes, line by line. Every process
+ * of a call carries a variable naming it, so a call its client cancels ends
+ * inside the container, its whole tree with it
  *
  * Configuration is loaded from config.json:
  * - podman.hostUser: System user that owns the Podman process
@@ -29,7 +32,31 @@
  */
 
 const { spawn } = require('child_process');
+const { randomUUID } = require('crypto');
 const config = require('../config.json');
+
+// The byte a line of output ends with
+const NEWLINE = 0x0a;
+
+// The variable every process of a call inherits, its value naming the call
+const CALL_VARIABLE = 'MCP_CALL';
+
+// The rounds a kill makes, a process forked while one runs dying in the next
+const KILL_ROUNDS = 5;
+
+/**
+ * The script that kills inside the container every process of a call, found
+ * by the variable it inherited, until none is left
+ * @param {string} call The value naming the call
+ * @returns {string}
+ */
+function killScript(call) {
+	return `for i in $(seq ${KILL_ROUNDS}); do
+	found=$(grep -l -a ${CALL_VARIABLE}=${call} /proc/[0-9]*/environ 2>/dev/null) || break
+	for f in $found; do p=\${f#/proc/}; kill -KILL \${p%/environ} 2>/dev/null; done
+done
+`;
+}
 
 // Construct full container name (pod-container)
 const fullContainerName = `${config.podman.podName}-${config.podman.containerName}`;
@@ -38,18 +65,39 @@ const fullContainerName = `${config.podman.podName}-${config.podman.containerNam
  * Execute command in Podman container
  * @param {string} script Bash script to execute
  * @param {number} [capBytes] Output bytes kept, head and tail, defaults to the output limit
+ * @param {function(string): void} [partial] Takes the whole lines of the head as they come
+ * @param {AbortSignal} [signal] Ends the command and every process it started
  * @returns {Promise<{head: Buffer, tail: Buffer, total: number, truncated: boolean, exitCode: number}>}
  */
-async function podmanExec(script, capBytes = config.podman.outputLimitBytes) {
+async function podmanExec(
+	script,
+	capBytes = config.podman.outputLimitBytes,
+	partial = () => {},
+	signal = undefined
+) {
 	return new Promise((resolve) => {
 		// The inner bash reads the script from its stdin, exec collapses the wrapper
-		const podmanCmd = `podman exec -i -u ${config.podman.containerUser} ${fullContainerName} bash -c "exec timeout ${config.podman.timeout} bash 2>&1"`;
+		const call = randomUUID();
+		const podmanCmd = `podman exec -i -e ${CALL_VARIABLE}=${call} -u ${config.podman.containerUser} ${fullContainerName} bash -c "exec timeout ${config.podman.timeout} bash 2>&1"`;
 		const proc = spawn('su', ['-', config.podman.hostUser, '-c', podmanCmd]);
+
+		// Ending the host side leaves the container side running: the kill
+		// goes inside, by a second exec reading its script on stdin
+		const stop = () => {
+			const killCmd = `podman exec -i -u ${config.podman.containerUser} ${fullContainerName} sh`;
+			const kill = spawn('su', ['-', config.podman.hostUser, '-c', killCmd]);
+			kill.on('error', () => {});
+			kill.stdin.on('error', () => {});
+			kill.stdin.end(killScript(call));
+		};
+		signal?.addEventListener('abort', stop, { once: true });
 
 		const headMax = Math.floor(capBytes / 2);
 		const tailMax = capBytes - headMax;
 		const head = [];
 		let headBytes = 0;
+		// The bytes of the head after its last line given to partial
+		let unsaid = Buffer.alloc(0);
 		const chunks = [];
 		let kept = 0;
 		let total = 0;
@@ -62,6 +110,12 @@ async function podmanExec(script, capBytes = config.podman.outputLimitBytes) {
 			if (take > 0) {
 				head.push(data.subarray(0, take));
 				headBytes += take;
+				unsaid = Buffer.concat([unsaid, data.subarray(0, take)]);
+				const end = unsaid.lastIndexOf(NEWLINE);
+				if (end >= 0) {
+					partial(unsaid.subarray(0, end + 1).toString());
+					unsaid = unsaid.subarray(end + 1);
+				}
 				data = data.subarray(take);
 			}
 			if (data.length === 0) {
@@ -84,6 +138,7 @@ async function podmanExec(script, capBytes = config.podman.outputLimitBytes) {
 
 		// A process ended by a signal has no exit code, it reads as a failure
 		proc.on('close', (exitCode) => {
+			signal?.removeEventListener('abort', stop);
 			const ring = Buffer.concat(chunks);
 			const tail = ring.subarray(Math.max(0, ring.length - tailMax));
 			resolve({

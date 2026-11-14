@@ -7,7 +7,10 @@ VictoriaLogs log store to any MCP client, behind one endpoint. Built on the
 official TypeScript SDK v2
 ([@modelcontextprotocol/server](https://github.com/modelcontextprotocol/typescript-sdk)),
 it speaks the 2026-07-28 revision of the protocol and the 2025 ones on the
-same endpoint, each client getting the newest revision it knows.
+same endpoint, each client getting the newest revision it knows. The
+`bash_tool` of the sandbox streams its output while it runs to a 2026-07-28
+client that asks for it, as partial results
+([SEP-2998](https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2998)).
 
 - llama.cpp Svelte WebUI (native MCP client)
 - OpenAI ChatGPT (web, custom MCP server)
@@ -197,9 +200,13 @@ it: a JPEG that fits as it is, a WebP as it is or not at all, an opaque PNG
 that fits as it is when lighter than its JPEG, any other as a JPEG within
 `maxDimension` pixels, turned upright and laid on white, through libvips
 (sharp); one over `maxMegapixels` is never decoded. Long output keeps its head and
-its tail with the hidden bytes counted. Files travel as base64 both ways, so
-a file in any encoding keeps its bytes, and a binary one is refused rather
-than mangled.
+its tail with the hidden bytes counted. A call whose `_meta` names a
+`partialResultToken`, from a client that declares `partialResults`, gets the
+lines of the head of `bash_tool` as they come, each in a
+`notifications/tools/partial_result`; its result stays whole. A call its
+client cancels ends inside the container, every process it started with it.
+Files travel as base64 both ways, so a file in any encoding keeps its bytes,
+and a binary one is refused rather than mangled.
 
 `sandbox-manager.js` drives the pod: `build`, `destroy`, `start`, `stop`,
 `reset` (a fresh container from the existing image), `status`, `logs`,

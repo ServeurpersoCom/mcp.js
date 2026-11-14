@@ -292,13 +292,16 @@ function listing(given, body) {
 
 /**
  * Tool: bash_tool
- * The command on stdin, the merged output back with the exit code
+ * The command on stdin, the merged output back with the exit code, its lines
+ * shown to the client as they come
  * @param {object} args Tool arguments
+ * @param {function(string): void} partial Takes the output as it comes
+ * @param {AbortSignal} signal Ends the command once its client cancels the call
  * @returns {Promise<object>} Tool result
  */
-async function tool_bash(args = {}) {
+async function tool_bash(args = {}, partial, signal) {
 	const t0 = Date.now();
-	const result = await podmanExec(args.command);
+	const result = await podmanExec(args.command, undefined, partial, signal);
 	const elapsed = Date.now() - t0;
 	const output = bounded(result);
 

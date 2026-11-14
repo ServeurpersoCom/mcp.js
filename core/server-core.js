@@ -11,6 +11,12 @@
 const { Server } = require('@modelcontextprotocol/server');
 const { breach } = require('./tool-check');
 
+// The notification a call streams its output by while it runs, to a client
+// whose request declares partialResults among its capabilities and names a
+// partialResultToken (SEP-2998)
+const PARTIAL_RESULT = 'notifications/tools/partial_result';
+const CAPABILITIES_META = 'io.modelcontextprotocol/clientCapabilities';
+
 /**
  * Content block of a typed tool result
  * @param {{type: string, text?: string, data?: string, mimeType?: string}} result
@@ -33,6 +39,27 @@ function contentBlock(result) {
 	}
 
 	throw new Error(`Unsupported tool result type: ${result.type}`);
+}
+
+/**
+ * What a handler shows of its output while it runs: each text goes to the
+ * client as the next partial result of the call when its request asks for
+ * them, nowhere otherwise; the result the handler returns stays whole
+ * @param {object} request The tools/call request
+ * @param {object} ctx Its context
+ * @returns {function(string): void}
+ */
+function partials(request, ctx) {
+	const token = request.params._meta?.partialResultToken;
+	const capabilities = ctx.mcpReq.envelope?.[CAPABILITIES_META];
+	if (token === undefined || !capabilities?.partialResults) {
+		return () => {};
+	}
+	let seq = 0;
+	return (text) => {
+		const params = { partialResultToken: token, seq: seq++, content: [{ type: 'text', text }] };
+		ctx.mcpReq.notify({ method: PARTIAL_RESULT, params }).catch(() => {});
+	};
 }
 
 /**
@@ -61,7 +88,7 @@ function createFactory(bundle) {
 
 		server.setRequestHandler('tools/list', async () => ({ tools }));
 
-		server.setRequestHandler('tools/call', async (request) => {
+		server.setRequestHandler('tools/call', async (request, ctx) => {
 			const { name, arguments: args } = request.params;
 			if (!handlers[name]) {
 				throw new Error(`Unknown tool: ${name}`);
@@ -73,7 +100,7 @@ function createFactory(bundle) {
 
 			let result;
 			try {
-				result = await handlers[name](args ?? {});
+				result = await handlers[name](args ?? {}, partials(request, ctx), ctx.mcpReq.signal);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				throw new Error(`Tool execution failed: ${message}`);
