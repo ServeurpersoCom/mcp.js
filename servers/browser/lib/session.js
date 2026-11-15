@@ -31,7 +31,10 @@ const EVENTS = [
 	'browsingContext.userPromptOpened',
 	'browsingContext.userPromptClosed',
 	'input.fileDialogOpened',
-	'log.entryAdded'
+	'log.entryAdded',
+	'network.beforeRequestSent',
+	'network.responseCompleted',
+	'network.fetchError'
 ];
 const PAGE_CALL = `(op, json, node) => JSON.stringify((${PAGE})(op, JSON.parse(json), node) ?? null)`;
 const PAGE_NODE = `(op, json) => (${PAGE})(op, JSON.parse(json))`;
@@ -39,6 +42,7 @@ const PAGE_NODE = `(op, json) => (${PAGE})(op, JSON.parse(json))`;
 let link = null;
 let chain = Promise.resolve();
 let idle = null;
+let wake = null;
 let state = fresh();
 
 function fresh() {
@@ -51,7 +55,7 @@ function fresh() {
 		opened: [],
 		console: [],
 		loading: false,
-		onLoad: null
+		requests: null
 	};
 }
 
@@ -76,9 +80,19 @@ function onEvent(method, params) {
 		case 'browsingContext.navigationFailed':
 			if (params.context === state.context) {
 				state.loading = false;
-				if (state.onLoad) {
-					state.onLoad();
-				}
+				nudge();
+			}
+			break;
+		case 'network.beforeRequestSent':
+			if (state.requests && params.context === state.context) {
+				state.requests.add(params.request.request);
+			}
+			break;
+		case 'network.responseCompleted':
+		case 'network.fetchError':
+			if (state.requests) {
+				state.requests.delete(params.request.request);
+				nudge();
 			}
 			break;
 		case 'browsingContext.userPromptOpened':
@@ -299,26 +313,65 @@ function select(context) {
 	state.loading = false;
 }
 
+function nudge() {
+	if (wake) {
+		wake();
+	}
+}
+
 /**
- * Wait settleMs for a navigation an action may start, then for its load
+ * Wait until ready() holds, an event nudging the check, or ms pass
+ * @param {function(): boolean} ready
+ * @param {number} ms
  * @returns {Promise<void>}
  */
-function settle() {
+function until(ready, ms) {
 	return new Promise((resolve) => {
-		setTimeout(() => {
-			if (!state.loading) {
-				resolve();
-				return;
+		if (ready()) {
+			resolve();
+			return;
+		}
+		const done = () => {
+			clearTimeout(timer);
+			wake = null;
+			resolve();
+		};
+		const timer = setTimeout(done, ms);
+		wake = () => {
+			if (ready()) {
+				done();
 			}
-			const done = () => {
-				clearTimeout(timer);
-				state.onLoad = null;
-				resolve();
-			};
-			const timer = setTimeout(done, config.timeoutMs);
-			state.onLoad = done;
-		}, config.settleMs);
+		};
 	});
+}
+
+/**
+ * Watch the requests the current tab sends from now on, for settle
+ */
+function begin() {
+	state.requests = new Set();
+}
+
+/**
+ * Wait settleMs for what an action starts, then up to networkMs for the
+ * requests it sent, a single page app fetching its next view, then for the
+ * load of a navigation
+ * @returns {Promise<void>}
+ */
+async function settle() {
+	await new Promise((resolve) => setTimeout(resolve, config.settleMs));
+	await until(() => !state.requests || !state.requests.size, config.networkMs);
+	await until(() => !state.loading, config.timeoutMs);
+	state.requests = null;
+}
+
+/**
+ * A URL as a result shows it, cut after urlChars
+ * @param {string} url
+ * @returns {string}
+ */
+function shorten(url) {
+	return url.length > config.urlChars ? url.slice(0, config.urlChars) + '...' : url;
 }
 
 /**
@@ -332,7 +385,7 @@ async function footer(context) {
 	const current = state.context || context;
 	const info = await page(current, 'info').catch(() => null);
 	if (info) {
-		lines.push(`Page: ${JSON.stringify(info.title)} ${info.url}`);
+		lines.push(`Page: ${JSON.stringify(info.title)} ${shorten(info.url)}`);
 	}
 	if (state.prompt) {
 		const p = state.prompt;
@@ -352,7 +405,9 @@ async function footer(context) {
 		for (const id of state.opened) {
 			const index = list.findIndex((t) => t.context === id);
 			if (index >= 0) {
-				lines.push(`New tab ${index}: ${list[index].url}, browser_tabs select to work in it`);
+				lines.push(
+					`New tab ${index}: ${shorten(list[index].url)}, browser_tabs select to work in it`
+				);
 			}
 		}
 		state.opened = [];
@@ -368,7 +423,9 @@ const api = {
 	tabs,
 	context,
 	select,
+	begin,
 	settle,
+	shorten,
 	footer,
 	state: () => state
 };

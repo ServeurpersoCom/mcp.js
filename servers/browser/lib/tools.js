@@ -275,6 +275,7 @@ async function clickAt(s, context, ref, steps = 1, button = BUTTONS.left, keys =
 function act(fn) {
 	return session(async (s) => {
 		const context = await s.context();
+		s.begin();
 		const done = await fn(s, context);
 		await s.settle();
 		return done + (await s.footer(context));
@@ -289,9 +290,9 @@ function navigate({ url }) {
 			if (!/no answer/.test(error.message)) {
 				throw error;
 			}
-			return `Navigated to ${url}, still loading after ${config.timeoutMs} ms`;
+			return `Navigated, still loading after ${config.timeoutMs} ms`;
 		}
-		return `Navigated to ${url}`;
+		return 'Navigated';
 	});
 }
 
@@ -346,7 +347,7 @@ function tabs({ action, index }) {
 		for (const [i, tab] of list.entries()) {
 			const info = await s.page(tab.context, 'info').catch(() => ({ title: '' }));
 			lines.push(
-				`${i}${tab.context === current ? ' [current]' : ''}: ${JSON.stringify(info.title)} ${tab.url}`
+				`${i}${tab.context === current ? ' [current]' : ''}: ${JSON.stringify(info.title)} ${s.shorten(tab.url)}`
 			);
 		}
 		return lines.join('\n');
@@ -374,7 +375,7 @@ function snapshot({ ref, depth, filter, find, max_chars, offset }) {
 		if (from + size < outline.length) {
 			text += `\n[cut at char ${from + size} of ${outline.length}, read on with offset=${from + size}]`;
 		}
-		const head = `Page: ${JSON.stringify(info.title)} ${info.url}`;
+		const head = `Page: ${JSON.stringify(info.title)} ${s.shorten(info.url)}`;
 		return `${head}\n${text || (find ? `Nothing matches "${find}"` : 'Nothing shown')}`;
 	});
 }

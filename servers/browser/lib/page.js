@@ -463,11 +463,7 @@ function page(op, args, node) {
 			role: r,
 			name:
 				r === 'generic'
-					? cut(
-							textOf(el) ||
-								collapse(el.getAttribute('aria-label')) ||
-								collapse(el.getAttribute('title'))
-						)
+					? cut(collapse(el.getAttribute('aria-label')) || collapse(el.getAttribute('title')))
 					: nameOf(el, r),
 			props: props(el, r),
 			value: valueOf(el, r),
@@ -480,7 +476,7 @@ function page(op, args, node) {
 		if (tag === 'iframe' && !kids.length) {
 			node.props.push('not read');
 		}
-		if ((FROM_CONTENT.has(r) || r === 'generic') && node.name && !kids.some((k) => k.role)) {
+		if (FROM_CONTENT.has(r) && node.name && !kids.some((k) => k.role)) {
 			node.children = [];
 		}
 		if (tag === 'select' || r === 'textbox' || r === 'searchbox') {
@@ -547,8 +543,12 @@ function page(op, args, node) {
 		let tree = build(root, false);
 		if (filter === 'interactive') {
 			tree = prune(tree, interactive);
+			const lone = (n) => n.role === 'generic' && n.children.length === 1 && !n.children[0].role;
 			const strip = (nodes) =>
-				nodes.filter((n) => n.role).map((n) => ({ ...n, children: strip(n.children || []) }));
+				nodes
+					.filter((n) => n.role)
+					.map((n) => ({ ...n, children: lone(n) ? n.children : strip(n.children || []) }))
+					.filter((n) => interactive(n) || n.name || n.children.length);
 			tree = strip(tree);
 		}
 		if (find) {
