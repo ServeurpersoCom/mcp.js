@@ -36,6 +36,7 @@ const TOOLS_DEFINITIONS = require('../tools.json').map((tool) => ({
 }));
 
 const REF = /^e\d+$/;
+const UNREADABLE = /Failed to add file (.+?) \(/;
 const MOUSE = 'mouse';
 const KEYBOARD = 'keyboard';
 const BUTTONS = { left: 0, middle: 1, right: 2 };
@@ -373,10 +374,10 @@ function snapshot({ ref, depth, filter, find, max_chars, offset }) {
 		const outline = await s.page(context, 'snapshot', { ref: root, depth, filter, find });
 		let text = outline.slice(from, from + size);
 		if (from + size < outline.length) {
-			text += `\n[cut at char ${from + size} of ${outline.length}, read on with offset=${from + size}]`;
+			text += `\nmore: offset=${from + size}`;
 		}
 		const head = `Page: ${JSON.stringify(info.title)} ${s.shorten(info.url)}`;
-		return `${head}\n${text || (find ? `Nothing matches "${find}"` : 'Nothing shown')}`;
+		return `${head}\n${text || (find ? 'No match' : 'Nothing shown')}`;
 	});
 }
 
@@ -456,11 +457,7 @@ function waitFor({ text, textGone, time }) {
 		for (;;) {
 			const shown = (await s.page(context, 'text')).includes(needle);
 			if (shown === (text != null)) {
-				return (
-					(text != null
-						? `Text ${JSON.stringify(needle)} shown`
-						: `Text ${JSON.stringify(needle)} gone`) + (await s.footer(context))
-				);
+				return (text != null ? 'Text shown' : 'Text gone') + (await s.footer(context));
 			}
 			if (Date.now() > deadline) {
 				throw new Error(
@@ -487,7 +484,7 @@ function click({ target, button, doubleClick, modifiers }) {
 	return act(async (s, context) => {
 		const keys = mods.map((m) => keyValue(m, s.state().platform));
 		await clickAt(s, context, ref, twice ? 2 : 1, which, keys);
-		return `${twice ? 'Double clicked' : 'Clicked'} ${target}`;
+		return twice ? 'Double clicked' : 'Clicked';
 	});
 }
 
@@ -510,7 +507,7 @@ function type({ target, text, slowly, submit }) {
 		if (enter) {
 			await perform(s, context, keyActions([KEYS.Enter]));
 		}
-		return `Typed into ${target}${enter ? ' and submitted' : ''}`;
+		return enter ? 'Typed and submitted' : 'Typed';
 	});
 }
 
@@ -551,7 +548,7 @@ function selectOption({ target, values }) {
 	return act(async (s, context) => {
 		await s.page(context, 'locate', { ref, scroll: true, enabled: true });
 		const chosen = await s.page(context, 'select', { ref, values });
-		return `Selected ${chosen} in ${target}`;
+		return `Selected ${chosen}`;
 	});
 }
 
@@ -570,7 +567,7 @@ function pressKey({ key, seconds }) {
 			});
 		}
 		await perform(s, context, actions);
-		return `Pressed ${key}`;
+		return 'Pressed';
 	});
 }
 
@@ -579,7 +576,7 @@ function hover({ target }) {
 	return act(async (s, context) => {
 		const point = await s.page(context, 'locate', { ref, scroll: true, hit: true });
 		await perform(s, context, pointerActions([at(point)]));
-		return `Hovered ${target}`;
+		return 'Hovered';
 	});
 }
 
@@ -599,7 +596,7 @@ function drag({ from, to }) {
 				{ type: 'pointerUp', button: BUTTONS.left }
 			])
 		);
-		return `Dragged ${from} onto ${to}`;
+		return 'Dragged';
 	});
 }
 
@@ -614,6 +611,7 @@ function dragToOffset({ target, dx, dy }) {
 			x: Math.min(Math.max(start.x + ox, 0), info.width - 1),
 			y: Math.min(Math.max(start.y + oy, 0), info.height - 1)
 		};
+		const moved = { x: Math.round(end.x - start.x), y: Math.round(end.y - start.y) };
 		await perform(
 			s,
 			context,
@@ -624,7 +622,9 @@ function dragToOffset({ target, dx, dy }) {
 				{ type: 'pointerUp', button: BUTTONS.left }
 			])
 		);
-		return `Dragged ${target} by ${Math.round(end.x - start.x)}, ${Math.round(end.y - start.y)}`;
+		return moved.x === Math.round(ox) && moved.y === Math.round(oy)
+			? 'Dragged'
+			: `Dragged by ${moved.x}, ${moved.y}, kept in the viewport`;
 	});
 }
 
@@ -667,9 +667,17 @@ function fileUpload({ paths, target }) {
 		} else {
 			throw new Error('No file chooser open, give the target of the file input');
 		}
-		await s.call('input.setFiles', { context: where, element: { sharedId: element }, files });
+		try {
+			await s.call('input.setFiles', { context: where, element: { sharedId: element }, files });
+		} catch (error) {
+			const failed = error.message.match(UNREADABLE);
+			if (failed) {
+				throw new Error(`Cannot read ${failed[1]}`);
+			}
+			throw error;
+		}
 		s.state().fileDialog = null;
-		return `Gave ${files.length} file${files.length > 1 ? 's' : ''}${ref ? ` to ${target}` : ''}`;
+		return `Gave ${files.length} file${files.length > 1 ? 's' : ''}`;
 	});
 }
 

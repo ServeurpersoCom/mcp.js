@@ -112,7 +112,7 @@ function onEvent(method, params) {
 				break;
 			}
 			state.console.push(
-				`${params.level} ${params.type === 'console' ? params.method : params.type}: ${params.text}`
+				`${params.type === 'console' ? params.method : params.type}: ${params.text.trim().replace(/\r?\n/g, ' / ')}`
 			);
 			if (state.console.length > config.consoleEntries) {
 				state.console.shift();
