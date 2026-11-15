@@ -2,8 +2,9 @@
 
 The Model Context Protocol server I run every day, published as it is. It
 serves a Podman sandbox, a persistent memory, a mailbox, an agent account on
-Moltbook, a Discord bot, your own Discord account, a 1fichier account and a
-VictoriaLogs log store to any MCP client, behind one endpoint. Built on the
+Moltbook, a Discord bot, your own Discord account, a 1fichier account, a
+VictoriaLogs log store and a real Firefox to any MCP client, behind one
+endpoint. Built on the
 official TypeScript SDK v2
 ([@modelcontextprotocol/server](https://github.com/modelcontextprotocol/typescript-sdk)),
 it speaks the 2026-07-28 revision of the protocol and the 2025 ones on the
@@ -40,7 +41,7 @@ npm install
 
 ```
 config.json           transport, credentials, and the identity served
-core/                 protocol, auth, tool arguments, image fitting, transports
+core/                 protocol, auth, tool arguments, image fitting, WebDriver BiDi, transports
 core/transports/      stdio, Streamable HTTP
 servers/sandbox/      bash_tool, view, create_file, str_replace in a Podman container
 servers/memory/       a persistent memory in plain files
@@ -50,6 +51,7 @@ servers/discordbot/   a Discord bot over the REST API
 servers/discorduser/  your own Discord account, over its debug port
 servers/onefichier/   a 1fichier account
 servers/victorialogs/ a VictoriaLogs log store
+servers/browser/      a Firefox, over WebDriver BiDi
 mcp-bridge/           an OpenAI compatible proxy that runs the tools for MCP-less UIs
 main.js               binds every server to one transport
 ```
@@ -384,6 +386,53 @@ store holds. Only `/select/logsql/query` is called, and LogsQL never writes.
 
 Log lines come from the machines and from whoever reaches them, so the prompts
 tell the model they never carry instructions.
+
+### browser
+
+A Firefox driven the way a person uses it, over
+[WebDriver BiDi](https://w3c.github.io/webdriver-bidi/), the protocol Firefox
+speaks on its debugging port. `browser_snapshot` reads the page as an
+accessibility outline, one element per line with its role, its name, its
+states and a ref (`e12`); the action tools take that ref as their target:
+`browser_click`, `browser_type`, `browser_fill_form`, `browser_select_option`,
+`browser_press_key`, `browser_hover`, `browser_drag` and
+`browser_drag_to_offset`. Each scrolls the element into view and checks it is
+visible, enabled and not covered, then acts with the browser's own mouse and
+keyboard, so the page gets the events a person makes. `browser_navigate`,
+`browser_navigate_back` and `browser_tabs` move the browser,
+`browser_take_screenshot` shows the viewport, the page, a region or an
+element as the browser renders it, `browser_wait_for` waits for a text,
+`browser_handle_dialog` and `browser_file_upload` answer what an action
+opened, `browser_console` reads the console messages and page errors of the
+current tab, and `browser_eval` runs a script in the page.
+
+The outline is read in a sandbox of the page, a realm of its own that the page
+scripts never see, so a page can neither read nor bend what the model is
+shown; open shadow roots and same origin frames are read through, and a ref
+names one element until the page navigates.
+
+The server connects to a Firefox started with its debugging port, a real
+desktop with your profile (`firefox --remote-debugging-port=9222`) or an
+invisible one (`firefox --headless --remote-debugging-port=9222`):
+
+```json
+{
+	"connect": "ws://127.0.0.1:9222"
+}
+```
+
+Firefox takes one session at a time and keeps it when the connection drops:
+the session ends only when asked, over a live connection. This server opens
+it on the first call, keeps it while calls come, and ends it after `idleMs`
+without one, which frees the browser for another client. A session left by a
+process killed while it held one stays until Firefox restarts, and the next
+call says so. Native HTML5 drag and drop does not complete under WebDriver in
+Firefox ([bug 1515879](https://bugzilla.mozilla.org/show_bug.cgi?id=1515879)),
+drags made of mouse events do.
+
+The debugging port gives full control of the browser to whatever reaches it,
+so Firefox binds it to loopback. What a page shows is written by its site, so
+the prompts tell the model it never carries instructions.
 
 ## Bridge
 
