@@ -42,6 +42,9 @@ const TOOLS_DEFINITIONS = rawDefinitions.map((tool) => ({
 	inputSchema: tool.function.parameters
 }));
 
+// The byte a line of output ends with
+const NEWLINE = 0x0a;
+
 // The pixels view decodes at most, and the longest side and the JPEG quality
 // of an image it makes again
 const IMAGE_LIMITS = {
@@ -114,41 +117,123 @@ function under(given, rel) {
 }
 
 /**
- * A head and a tail as one text ending on a line end, the bytes hidden
- * between them counted, both cuts on line ends when the kept bytes hold one
- * @param {{head: Buffer, tail: Buffer, total: number, truncated: boolean}} kept
- * @returns {string} Empty, or text ending with a newline
+ * The line that counts the bytes a cut hides
+ * @param {number} n
+ * @returns {string}
  */
-function bounded(kept) {
-	let text;
-	if (!kept.truncated) {
-		text = Buffer.concat([kept.head, kept.tail]).toString();
-	} else {
-		const end = kept.head.lastIndexOf(0x0a);
-		const begin = kept.tail.indexOf(0x0a);
-		const first =
-			end < 0 ? Buffer.concat([kept.head, Buffer.from('\n')]) : kept.head.subarray(0, end + 1);
-		const last = begin < 0 ? kept.tail : kept.tail.subarray(begin + 1);
-		const hidden = kept.total - Math.min(kept.head.length, first.length) - last.length;
-		text = `${first}Long output with ${hidden} bytes hidden from context\n${last}`;
-	}
-	return text === '' || text.endsWith('\n') ? text : text + '\n';
+const hiddenLine = (n) => `Long output with ${n} bytes hidden from context\n`;
+
+/**
+ * The bytes past the whole lines at the front that hold n bytes or more, none
+ * when no line ends there
+ * @param {Buffer} bytes
+ * @param {number} n
+ * @returns {Buffer}
+ */
+function dropFront(bytes, n) {
+	const at = bytes.indexOf(NEWLINE, n - 1);
+	return at < 0 ? bytes.subarray(bytes.length) : bytes.subarray(at + 1);
 }
 
 /**
- * A whole buffer kept within the output limit, head and tail
- * @param {Buffer} buffer
+ * The bytes before the whole lines at the back that hold n bytes or more
+ * @param {Buffer} bytes
+ * @param {number} n
+ * @returns {Buffer}
+ */
+function dropBack(bytes, n) {
+	const room = Math.max(bytes.length - n, 0);
+	const at = room === 0 ? -1 : bytes.lastIndexOf(NEWLINE, room - 1);
+	return bytes.subarray(0, at + 1);
+}
+
+/**
+ * A head and a tail as one text, the bytes hidden between them counted, both
+ * cuts on line ends when the kept bytes hold one, the head, the line and the
+ * tail within the budget together, so a client that cuts it again within the
+ * same budget changes nothing
+ * @param {{head: Buffer, tail: Buffer, total: number, truncated: boolean}} kept
+ * @param {number} [budget] Bytes of the text at most
  * @returns {string}
  */
-function clipped(buffer) {
+function bounded(kept, budget = config.podman.outputLimitBytes) {
+	if (!kept.truncated) {
+		return Buffer.concat([kept.head, kept.tail]).toString();
+	}
+	const end = kept.head.lastIndexOf(NEWLINE);
+	const begin = kept.tail.indexOf(NEWLINE);
+	let first = Buffer.from(end < 0 ? `${kept.head}\n` : kept.head.subarray(0, end + 1).toString());
+	let last = Buffer.from((begin < 0 ? kept.tail : kept.tail.subarray(begin + 1)).toString());
+	// The bytes of the output the head and the tail still show
+	let shownFirst = end < 0 ? kept.head.length : end + 1;
+	let shownLast = begin < 0 ? kept.tail.length : kept.tail.length - begin - 1;
+	// Whole lines go from the larger of the head and the tail, the head on a
+	// tie, so the end of the output, and the line that closes it, stays
+	for (;;) {
+		const line = Buffer.from(hiddenLine(kept.total - shownFirst - shownLast));
+		const size = first.length + line.length + last.length;
+		if (size <= budget || (!first.length && !last.length)) {
+			return Buffer.concat([first, line, last]).toString();
+		}
+		if (first.length && first.length >= last.length) {
+			const rest = dropBack(first, size - budget);
+			shownFirst = rest.length ? shownFirst - Math.min(first.length - rest.length, shownFirst) : 0;
+			first = rest;
+		} else {
+			const rest = dropFront(last, size - budget);
+			shownLast = rest.length ? shownLast - Math.min(last.length - rest.length, shownLast) : 0;
+			last = rest;
+		}
+	}
+}
+
+/**
+ * A whole buffer kept as a head and a tail within the output limit
+ * @param {Buffer} buffer
+ * @returns {{head: Buffer, tail: Buffer, total: number, truncated: boolean}}
+ */
+function held(buffer) {
 	const headMax = Math.floor(config.podman.outputLimitBytes / 2);
 	const tailMax = config.podman.outputLimitBytes - headMax;
-	return bounded({
+	return {
 		head: buffer.subarray(0, headMax),
 		tail: buffer.subarray(Math.max(headMax, buffer.length - tailMax)),
 		total: buffer.length,
 		truncated: buffer.length > headMax + tailMax
-	});
+	};
+}
+
+/**
+ * The output with a closing line after it, on a line of its own, kept within
+ * the output limit as the output is
+ * @param {{head: Buffer, tail: Buffer, total: number, truncated: boolean}} output
+ * @param {string} line
+ * @returns {{head: Buffer, tail: Buffer, total: number, truncated: boolean}}
+ */
+function closed(output, line) {
+	const end = output.tail.length ? output.tail.at(-1) : output.head.at(-1);
+	const added = Buffer.from((output.total && end !== NEWLINE ? '\n' : '') + line);
+	if (!output.truncated) {
+		return held(Buffer.concat([output.head, output.tail, added]));
+	}
+	const tailMax = config.podman.outputLimitBytes - Math.floor(config.podman.outputLimitBytes / 2);
+	const tail = Buffer.concat([output.tail, added]);
+	return {
+		head: output.head,
+		tail: tail.subarray(Math.max(0, tail.length - tailMax)),
+		total: output.total + added.length,
+		truncated: true
+	};
+}
+
+/**
+ * A whole buffer and its closing line within the output limit, head and tail
+ * @param {Buffer} buffer
+ * @param {string} line
+ * @returns {string}
+ */
+function clipped(buffer, line) {
+	return bounded(closed(held(buffer), line));
 }
 
 /**
@@ -287,7 +372,7 @@ function listing(given, body) {
 		.sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)))
 		.map((rel) => `${human(sizes.get(rel))} ${under(given, rel)}\n`);
 	const tail = hidden > 0 ? `, ${hidden} hidden` : '';
-	return clipped(Buffer.from(lines.join(''))) + counted(sizes.size - 1, 'entry', 'entries') + tail;
+	return clipped(Buffer.from(lines.join('')), counted(sizes.size - 1, 'entry', 'entries') + tail);
 }
 
 /**
@@ -303,14 +388,17 @@ async function tool_bash(args = {}, partial, signal) {
 	const t0 = Date.now();
 	const result = await podmanExec(args.command, undefined, partial, signal);
 	const elapsed = Date.now() - t0;
-	const output = bounded(result);
 
 	// timeout exits 124 when it kills the command, the elapsed time tells it
-	// from a command that exits 124 itself
+	// from a command that exits 124 itself; the line that tells how the call
+	// ended closes the output, within the output limit
 	if (result.exitCode === 124 && elapsed >= config.podman.timeout * 1000) {
-		return textResult(`${output}Killed after ${config.podman.timeout} s`, true);
+		return textResult(bounded(closed(result, `Killed after ${config.podman.timeout} s`)), true);
 	}
-	return textResult(`${output}Exit code ${result.exitCode} (${elapsed} ms)`, result.exitCode !== 0);
+	return textResult(
+		bounded(closed(result, `Exit code ${result.exitCode} (${elapsed} ms)`)),
+		result.exitCode !== 0
+	);
 }
 
 /**
@@ -398,7 +486,7 @@ async function tool_view(args = {}) {
 		.map((line, idx) => `${first + idx}\t${line}\n`)
 		.join('');
 	const summary = ranged ? `Lines ${first}-${end} of ${total}` : counted(total, 'line', 'lines');
-	return textResult(clipped(Buffer.from(numbered)) + summary);
+	return textResult(clipped(Buffer.from(numbered), summary));
 }
 
 /**
