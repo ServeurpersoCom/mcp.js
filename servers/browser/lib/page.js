@@ -17,7 +17,6 @@
  * - fill: the value of a text field, set at once as a paste does
  * - select: options of a select, chosen by value or label
  * - state: whether a checkbox or radio is checked
- * - ref: the ref of an element, given one
  * - text: the rendered text of the page
  * - info: the url, title, visibility and viewport size of the page
  */
@@ -27,10 +26,9 @@
  * name from outside its body
  * @param {string} op
  * @param {object} args
- * @param {Element=} node An element the op receives from the session
  * @returns {*}
  */
-function page(op, args, node) {
+function page(op, args) {
 	const NAME_MAX = 200;
 	const SKIP = new Set([
 		'script',
@@ -684,8 +682,6 @@ function page(op, args, node) {
 			return select(args);
 		case 'state':
 			return Boolean(byRef(args.ref).checked);
-		case 'ref':
-			return refOf(node);
 		case 'text':
 			return document.body ? document.body.innerText : '';
 		case 'info':

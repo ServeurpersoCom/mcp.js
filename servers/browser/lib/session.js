@@ -30,13 +30,12 @@ const EVENTS = [
 	'browsingContext.load',
 	'browsingContext.userPromptOpened',
 	'browsingContext.userPromptClosed',
-	'input.fileDialogOpened',
 	'log.entryAdded',
 	'network.beforeRequestSent',
 	'network.responseCompleted',
 	'network.fetchError'
 ];
-const PAGE_CALL = `(op, json, node) => JSON.stringify((${PAGE})(op, JSON.parse(json), node) ?? null)`;
+const PAGE_CALL = `(op, json) => JSON.stringify((${PAGE})(op, JSON.parse(json)) ?? null)`;
 const PAGE_NODE = `(op, json) => (${PAGE})(op, JSON.parse(json))`;
 
 let link = null;
@@ -51,7 +50,6 @@ function fresh() {
 		context: null,
 		prompt: null,
 		onPrompt: null,
-		fileDialog: null,
 		opened: [],
 		console: [],
 		loading: false,
@@ -74,9 +72,6 @@ function onEvent(method, params) {
 		case 'browsingContext.navigationStarted':
 			if (params.context === state.context) {
 				state.loading = true;
-			}
-			if (state.fileDialog && params.context === state.fileDialog.context) {
-				state.fileDialog = null;
 			}
 			break;
 		case 'browsingContext.load':
@@ -106,9 +101,6 @@ function onEvent(method, params) {
 			break;
 		case 'browsingContext.userPromptClosed':
 			state.prompt = null;
-			break;
-		case 'input.fileDialogOpened':
-			state.fileDialog = params;
 			break;
 		case 'log.entryAdded':
 			if (params.source.context !== state.context) {
@@ -231,21 +223,16 @@ function exception(result) {
  * @param {string} context
  * @param {string} op
  * @param {object=} args
- * @param {string=} sharedId An element handed to the op
  * @returns {Promise<*>}
  */
-async function page(context, op, args = {}, sharedId) {
-	const parameters = [
-		{ type: 'string', value: op },
-		{ type: 'string', value: JSON.stringify(args) }
-	];
-	if (sharedId) {
-		parameters.push({ sharedId });
-	}
+async function page(context, op, args = {}) {
 	const result = await call('script.callFunction', {
 		functionDeclaration: PAGE_CALL,
 		target: { context, sandbox: SANDBOX },
-		arguments: parameters,
+		arguments: [
+			{ type: 'string', value: op },
+			{ type: 'string', value: JSON.stringify(args) }
+		],
 		awaitPromise: false
 	});
 	if (result.type === 'exception') {
@@ -383,8 +370,8 @@ function shorten(url) {
 }
 
 /**
- * The lines that end an action: the page it left, then any dialog, file
- * chooser or tab it opened
+ * The lines that end an action: the page it left, then any dialog or tab it
+ * opened
  * @param {string} context
  * @returns {Promise<string>}
  */
@@ -399,13 +386,6 @@ async function footer(context) {
 		const p = state.prompt;
 		lines.push(
 			`Dialog open: ${p.type} ${JSON.stringify(p.message)}, answer it with browser_handle_dialog`
-		);
-	}
-	if (state.fileDialog) {
-		const f = state.fileDialog;
-		const ref = await page(f.context, 'ref', {}, f.element.sharedId).catch(() => null);
-		lines.push(
-			`File chooser open${ref ? ` for ${ref}` : ''}, give it files with browser_file_upload`
 		);
 	}
 	if (state.opened.length) {

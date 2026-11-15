@@ -13,7 +13,7 @@
  *   browser_press_key, browser_hover, browser_drag, browser_drag_to_offset:
  *   real input on the elements a ref names, scrolled into view first and
  *   checked visible, enabled and not covered
- * - browser_handle_dialog, browser_file_upload: what an action opened
+ * - browser_handle_dialog: the dialog an action opened
  * - browser_console: the console messages and page errors since the last read
  * - browser_eval: a script run in the page, its value
  *
@@ -36,7 +36,7 @@ const TOOLS_DEFINITIONS = require('../tools.json').map((tool) => ({
 }));
 
 const REF = /^e\d+$/;
-const UNREADABLE = /Failed to add file (.+?) \(/;
+const UNKNOWN = /^unknown error: (Error: )?/;
 const MOUSE = 'mouse';
 const KEYBOARD = 'keyboard';
 const BUTTONS = { left: 0, middle: 1, right: 2 };
@@ -288,10 +288,19 @@ function navigate({ url }) {
 		try {
 			await s.call('browsingContext.navigate', { context, url, wait: 'complete' });
 		} catch (error) {
-			if (!/no answer/.test(error.message)) {
-				throw error;
+			if (/no answer/.test(error.message)) {
+				return `Navigated, still loading after ${config.timeoutMs} ms`;
 			}
-			return `Navigated, still loading after ${config.timeoutMs} ms`;
+			if (error.code === 'unsupported operation') {
+				throw new Error('Firefox does not open this address from a script');
+			}
+			if (error.code === 'invalid argument') {
+				throw new Error('Invalid URL, a full address such as https://example.com');
+			}
+			if (error.code === 'unknown error') {
+				throw new Error(`Cannot open the page: ${error.message.replace(UNKNOWN, '')}`);
+			}
+			throw error;
 		}
 		return 'Navigated';
 	});
@@ -299,7 +308,14 @@ function navigate({ url }) {
 
 function navigateBack() {
 	return act(async (s, context) => {
-		await s.call('browsingContext.traverseHistory', { context, delta: -1 });
+		try {
+			await s.call('browsingContext.traverseHistory', { context, delta: -1 });
+		} catch (error) {
+			if (error.code === 'no such history entry') {
+				throw new Error('No page to go back to');
+			}
+			throw error;
+		}
 		return 'Went back';
 	});
 }
@@ -650,35 +666,6 @@ function handleDialog({ accept, promptText }) {
 	});
 }
 
-function fileUpload({ paths, target }) {
-	const files = strings(paths, 'Paths');
-	const ref = target == null ? null : refOf(target, 'target');
-	return act(async (s, context) => {
-		const pending = s.state().fileDialog;
-		let element;
-		let where = context;
-		if (ref) {
-			element = await s.element(context, ref);
-		} else if (pending) {
-			element = pending.element.sharedId;
-			where = pending.context;
-		} else {
-			throw new Error('No file chooser open, give the target of the file input');
-		}
-		try {
-			await s.call('input.setFiles', { context: where, element: { sharedId: element }, files });
-		} catch (error) {
-			const failed = error.message.match(UNREADABLE);
-			if (failed) {
-				throw new Error(`Cannot read ${failed[1]}`);
-			}
-			throw error;
-		}
-		s.state().fileDialog = null;
-		return `Gave ${files.length} file${files.length > 1 ? 's' : ''}`;
-	});
-}
-
 function consoleRead() {
 	return session(async (s) => {
 		const entries = s.state().console.splice(0);
@@ -760,7 +747,6 @@ const TOOLS_MAPPING = {
 	browser_drag: tool(drag),
 	browser_drag_to_offset: tool(dragToOffset),
 	browser_handle_dialog: tool(handleDialog),
-	browser_file_upload: tool(fileUpload),
 	browser_console: tool(consoleRead),
 	browser_eval: tool(evaluate)
 };

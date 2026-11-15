@@ -402,9 +402,9 @@ keyboard, so the page gets the events a person makes. `browser_navigate`,
 `browser_navigate_back` and `browser_tabs` move the browser,
 `browser_take_screenshot` shows the viewport, the page, a region or an
 element as the browser renders it, `browser_wait_for` waits for a text,
-`browser_handle_dialog` and `browser_file_upload` answer what an action
-opened, `browser_console` reads the console messages and page errors of the
-current tab, and `browser_eval` runs a script in the page.
+`browser_handle_dialog` answers the dialog an action opened, `browser_console`
+reads the console messages and page errors of the current tab, and
+`browser_eval` runs a script in the page.
 
 The outline is read in a sandbox of the page, a realm of its own that the page
 scripts never see, so a page can neither read nor bend what the model is
