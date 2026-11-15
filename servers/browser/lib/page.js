@@ -12,7 +12,8 @@
  * - snapshot: the accessibility tree as an indented outline, each node its
  *   role, its name, its states and its ref
  * - locate: the viewport point of the center of an element, scrolled into
- *   view, checked visible, enabled and not covered when asked
+ *   view, checked visible, enabled and not covered when asked, refused for a
+ *   click on a file input or its label
  * - element: the element itself, for the commands that take a node
  * - fill: the value of a text field, set at once as a paste does
  * - select: options of a select, chosen by value or label
@@ -570,8 +571,14 @@ function page(op, args) {
 		return false;
 	}
 
-	function locate({ ref, scroll, enabled, hit }) {
+	function locate({ ref, scroll, enabled, hit, click }) {
 		const el = byRef(ref);
+		if (click) {
+			const input = el.localName === 'input' ? el : el.closest('label')?.control;
+			if (input && input.localName === 'input' && input.type === 'file') {
+				throw new Error('File inputs are not supported');
+			}
+		}
 		const frames = [];
 		for (let w = el.ownerDocument.defaultView; w.frameElement; w = w.parent) {
 			frames.push(w.frameElement);

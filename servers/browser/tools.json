@@ -176,7 +176,7 @@
 		"type": "function",
 		"function": {
 			"name": "browser_click",
-			"description": "Click an element with the real mouse, after scrolling it into view and checking it is visible, enabled and not covered.",
+			"description": "Click an element with the real mouse, after scrolling it into view and checking it is visible, enabled and not covered. A file input or its label is refused: the tools give a page no files.",
 			"parameters": {
 				"properties": {
 					"target": {

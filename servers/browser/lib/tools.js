@@ -259,7 +259,13 @@ function perform(s, context, actions) {
 }
 
 async function clickAt(s, context, ref, steps = 1, button = BUTTONS.left, keys = []) {
-	const point = await s.page(context, 'locate', { ref, scroll: true, enabled: true, hit: true });
+	const point = await s.page(context, 'locate', {
+		ref,
+		scroll: true,
+		enabled: true,
+		hit: true,
+		click: true
+	});
 	const press = [];
 	for (let i = 0; i < steps; i++) {
 		press.push({ type: 'pointerDown', button }, { type: 'pointerUp', button });

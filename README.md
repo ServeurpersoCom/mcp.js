@@ -398,7 +398,8 @@ states and a ref (`e12`); the action tools take that ref as their target:
 `browser_press_key`, `browser_hover`, `browser_drag` and
 `browser_drag_to_offset`. Each scrolls the element into view and checks it is
 visible, enabled and not covered, then acts with the browser's own mouse and
-keyboard, so the page gets the events a person makes. `browser_navigate`,
+keyboard, so the page gets the events a person makes. A click on a file input
+or its label is refused: the tools give a page no files. `browser_navigate`,
 `browser_navigate_back` and `browser_tabs` move the browser,
 `browser_take_screenshot` shows the viewport, the page, a region or an
 element as the browser renders it, `browser_wait_for` waits for a text,
