@@ -18,8 +18,8 @@
  * - browser_eval: a script run in the page, its value
  *
  * The pointer and the keyboard are the browser's own input, so the page gets
- * the events a person makes; text fields are filled at once unless typed
- * slowly
+ * the events a person makes; text is typed key by key into a field emptied
+ * first, all selected then deleted
  */
 
 const sharp = require('sharp');
@@ -80,6 +80,7 @@ const KEYS = {
 	Meta: ''
 };
 const KEY_JOIN = '+';
+const NEWLINE = /^\r?\n$/;
 const TAB_ACTIONS = ['list', 'new', 'close', 'select'];
 const FIELD_TYPES = ['textbox', 'checkbox', 'radio', 'combobox', 'slider'];
 const SHOT_TYPES = { png: 'image/png', jpeg: 'image/jpeg' };
@@ -214,7 +215,8 @@ function keyActions(values) {
 function typeActions(text) {
 	const actions = [];
 	for (const { segment } of segmenter.segment(text)) {
-		actions.push({ type: 'keyDown', value: segment }, { type: 'keyUp', value: segment });
+		const value = NEWLINE.test(segment) ? KEYS.Enter : segment;
+		actions.push({ type: 'keyDown', value }, { type: 'keyUp', value });
 	}
 	return [{ type: 'key', id: KEYBOARD, actions }];
 }
@@ -508,22 +510,21 @@ function click({ target, button, doubleClick, modifiers }) {
 	});
 }
 
-async function typeInto(s, context, ref, text, slowly) {
+async function typeInto(s, context, ref, text) {
 	await s.page(context, 'locate', { ref, scroll: true, enabled: true });
-	if (slowly) {
-		await s.page(context, 'fill', { ref, text: '' });
+	await s.page(context, 'focus', { ref });
+	await perform(s, context, keyActions([keyValue('ControlOrMeta', s.state().platform), 'a']));
+	await perform(s, context, keyActions([KEYS.Backspace]));
+	if (text) {
 		await perform(s, context, typeActions(text));
-	} else {
-		await s.page(context, 'fill', { ref, text });
 	}
 }
 
-function type({ target, text, slowly, submit }) {
+function type({ target, text, submit }) {
 	const ref = refOf(target, 'target');
-	const slow = flag(slowly, 'Slowly');
 	const enter = flag(submit, 'Submit');
 	return act(async (s, context) => {
-		await typeInto(s, context, ref, text, slow);
+		await typeInto(s, context, ref, text);
 		if (enter) {
 			await perform(s, context, keyActions([KEYS.Enter]));
 		}
@@ -554,8 +555,11 @@ function fillForm({ fields }) {
 				}
 			} else if (kind === 'combobox') {
 				await s.page(context, 'select', { ref, values: [value] });
+			} else if (kind === 'slider') {
+				await s.page(context, 'locate', { ref, scroll: true, enabled: true });
+				await s.page(context, 'fill', { ref, text: value });
 			} else {
-				await typeInto(s, context, ref, value, false);
+				await typeInto(s, context, ref, value);
 			}
 		}
 		return `Filled ${checked.length} field${checked.length > 1 ? 's' : ''}`;

@@ -213,7 +213,7 @@
 		"type": "function",
 		"function": {
 			"name": "browser_type",
-			"description": "Put text in a text field, replacing what it holds: at once by default, as a paste, or key by key with slowly for pages that react to each key.",
+			"description": "Type text into a text field with the keyboard, key by key, replacing what it holds: the field gets the events a person typing makes.",
 			"parameters": {
 				"properties": {
 					"target": {
@@ -224,10 +224,6 @@
 					"text": {
 						"title": "Text to type",
 						"type": "string"
-					},
-					"slowly": {
-						"title": "Type one key at a time",
-						"type": "boolean"
 					},
 					"submit": {
 						"title": "Press Enter after typing",

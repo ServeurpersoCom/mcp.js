@@ -15,7 +15,9 @@
  *   view, checked visible, enabled and not covered when asked, refused for a
  *   click on a file input or its label
  * - element: the element itself, for the commands that take a node
- * - fill: the value of a text field, set at once as a paste does
+ * - focus: a text field, checked as one and focused for the keyboard, the
+ *   caret put inside an editable element
+ * - fill: the value of a slider, set at once
  * - select: options of a select, chosen by value or label
  * - state: whether a checkbox or radio is checked
  * - text: the rendered text of the page
@@ -618,36 +620,33 @@ function page(op, args) {
 		return { x, y };
 	}
 
-	function fill({ ref, text }) {
+	function focus({ ref }) {
 		const el = byRef(ref);
 		const tag = el.localName;
-		el.focus();
-		if (
+		const text =
 			tag === 'textarea' ||
-			(tag === 'input' && TEXT_INPUTS.has((el.getAttribute('type') || '').toLowerCase()))
-		) {
-			el.value = text;
-			el.dispatchEvent(new Event('input', { bubbles: true }));
-			el.dispatchEvent(new Event('change', { bubbles: true }));
-			return true;
+			(tag === 'input' && TEXT_INPUTS.has((el.getAttribute('type') || '').toLowerCase())) ||
+			el.isContentEditable;
+		if (!text) {
+			throw new Error(`${ref} is not a text field`);
 		}
+		el.focus();
 		if (el.isContentEditable) {
-			const doc = el.ownerDocument;
-			doc.execCommand('selectAll');
-			if (text) {
-				doc.execCommand('insertText', false, text);
-			} else {
-				doc.execCommand('delete');
-			}
-			return true;
+			el.ownerDocument.getSelection().collapse(el, 0);
 		}
-		if (tag === 'input' && el.getAttribute('type') === 'range') {
-			el.value = text;
-			el.dispatchEvent(new Event('input', { bubbles: true }));
-			el.dispatchEvent(new Event('change', { bubbles: true }));
-			return true;
+		return true;
+	}
+
+	function fill({ ref, text }) {
+		const el = byRef(ref);
+		if (el.localName !== 'input' || el.getAttribute('type') !== 'range') {
+			throw new Error(`${ref} is not a slider`);
 		}
-		throw new Error(`${ref} is not a text field`);
+		el.focus();
+		el.value = text;
+		el.dispatchEvent(new Event('input', { bubbles: true }));
+		el.dispatchEvent(new Event('change', { bubbles: true }));
+		return true;
 	}
 
 	function select({ ref, values }) {
@@ -683,6 +682,8 @@ function page(op, args) {
 			return locate(args);
 		case 'element':
 			return byRef(args.ref);
+		case 'focus':
+			return focus(args);
 		case 'fill':
 			return fill(args);
 		case 'select':

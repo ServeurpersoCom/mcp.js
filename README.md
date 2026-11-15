@@ -429,7 +429,10 @@ without one, which frees the browser for another client. A session left by a
 process killed while it held one stays until Firefox restarts, and the next
 call says so. Native HTML5 drag and drop does not complete under WebDriver in
 Firefox ([bug 1515879](https://bugzilla.mozilla.org/show_bug.cgi?id=1515879)),
-drags made of mouse events do.
+drags made of mouse events do. Firefox sets `navigator.webdriver` while its
+debugging port is open, so pages read it as true whether a person or this
+server drives the browser; our Firefox is rebuilt with
+`Navigator::Webdriver()` returning false, so pages read false in both.
 
 The debugging port gives full control of the browser to whatever reaches it,
 so Firefox binds it to loopback. What a page shows is written by its site, so
