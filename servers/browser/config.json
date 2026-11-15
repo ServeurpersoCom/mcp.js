@@ -35,6 +35,7 @@
 		"idleMs": 300000,
 		"settleMs": 500,
 		"networkMs": 5000,
+		"quietMs": 100,
 		"dragMs": 300,
 		"pollMs": 100,
 		"snapshotChars": 45000,

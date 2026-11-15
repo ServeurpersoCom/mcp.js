@@ -75,6 +75,9 @@ function onEvent(method, params) {
 			if (params.context === state.context) {
 				state.loading = true;
 			}
+			if (state.fileDialog && params.context === state.fileDialog.context) {
+				state.fileDialog = null;
+			}
 			break;
 		case 'browsingContext.load':
 		case 'browsingContext.navigationFailed':
@@ -354,13 +357,18 @@ function begin() {
 
 /**
  * Wait settleMs for what an action starts, then up to networkMs for the
- * requests it sent, a single page app fetching its next view, then for the
- * load of a navigation
+ * requests it sent to stay quiet for quietMs, a single page app fetching its
+ * next view and then the code of that view, then for the load of a navigation
  * @returns {Promise<void>}
  */
 async function settle() {
 	await new Promise((resolve) => setTimeout(resolve, config.settleMs));
-	await until(() => !state.requests || !state.requests.size, config.networkMs);
+	const idle = () => !state.requests || !state.requests.size;
+	const deadline = Date.now() + config.networkMs;
+	do {
+		await until(idle, Math.max(deadline - Date.now(), 0));
+		await new Promise((resolve) => setTimeout(resolve, config.quietMs));
+	} while (!idle() && Date.now() < deadline);
 	await until(() => !state.loading, config.timeoutMs);
 	state.requests = null;
 }

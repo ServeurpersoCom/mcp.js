@@ -460,9 +460,7 @@ function waitFor({ text, textGone, time }) {
 				return (text != null ? 'Text shown' : 'Text gone') + (await s.footer(context));
 			}
 			if (Date.now() > deadline) {
-				throw new Error(
-					`Text ${JSON.stringify(needle)} still ${text != null ? 'absent' : 'shown'} after ${config.timeoutMs} ms`
-				);
+				throw new Error(`Still ${text != null ? 'absent' : 'shown'} after ${config.timeoutMs} ms`);
 			}
 			await new Promise((resolve) => setTimeout(resolve, config.pollMs));
 		}
