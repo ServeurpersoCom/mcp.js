@@ -5,7 +5,7 @@
  *
  * Lifecycle:
  *   build    Build image + deploy pod (idempotent from any state)
- *   destroy  Stop + remove pod + remove image (idempotent, inverse of build)
+ *   destroy  Stop + remove pod + remove image + remove network (idempotent, inverse of build)
  *   start    Start pod
  *   stop     Stop pod
  *   reset    Recreate container from existing image (no rebuild)
@@ -50,6 +50,9 @@ class SandboxManager {
 		}
 		if (!this.podman.podName || !this.podman.containerName) {
 			throw new Error('podName and containerName required in config');
+		}
+		if (!this.podman.network || !this.podman.networkMtu) {
+			throw new Error('network and networkMtu required in config');
 		}
 
 		// Podman Kube naming: <pod> + <container>
@@ -133,6 +136,21 @@ class SandboxManager {
 		}
 	}
 
+	// Ensure the pod network exists (rootless pasta relays it, the MTU sets its throughput)
+	ensureNetwork() {
+		if (
+			this.exec('podman network exists ' + this.podman.network, {
+				stdio: 'pipe',
+				ignoreError: true
+			}) !== null
+		) {
+			return;
+		}
+		this.exec(
+			'podman network create --opt mtu=' + this.podman.networkMtu + ' ' + this.podman.network
+		);
+	}
+
 	// Ensure host volume directories exist
 	ensureVolumes() {
 		for (const [name, volPath] of Object.entries(this.paths)) {
@@ -177,8 +195,9 @@ class SandboxManager {
 
 		// Deploy pod
 		this.ensureVolumes();
+		this.ensureNetwork();
 		this.stageTo(this.podYamlSrc, this.tmpPodYaml);
-		this.exec('podman kube play ' + this.tmpPodYaml);
+		this.exec('podman kube play --network ' + this.podman.network + ' ' + this.tmpPodYaml);
 		this.unstage(this.tmpPodYaml);
 
 		this.waitForPod(30);
@@ -193,6 +212,7 @@ class SandboxManager {
 		this.exec('podman pod stop ' + this.podman.podName, { ignoreError: true, stdio: 'pipe' });
 		this.exec('podman pod rm ' + this.podman.podName, { ignoreError: true, stdio: 'pipe' });
 		this.exec('podman rmi ' + this.podman.imageName, { ignoreError: true, stdio: 'pipe' });
+		this.exec('podman network rm ' + this.podman.network, { ignoreError: true, stdio: 'pipe' });
 
 		console.log('[Manager] destroy complete');
 	}
@@ -224,8 +244,11 @@ class SandboxManager {
 
 		console.log('[Manager] reset: recreating container from existing image');
 
+		this.ensureNetwork();
 		this.stageTo(this.podYamlSrc, this.tmpPodYaml);
-		this.exec('podman kube play --replace ' + this.tmpPodYaml);
+		this.exec(
+			'podman kube play --replace --network ' + this.podman.network + ' ' + this.tmpPodYaml
+		);
 		this.unstage(this.tmpPodYaml);
 
 		this.waitForPod(30);

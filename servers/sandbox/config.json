@@ -36,6 +36,8 @@
 		"imageName": "localhost/sandbox-image:clean",
 		"podName": "pod",
 		"containerName": "container",
+		"network": "sandbox-net",
+		"networkMtu": 65520,
 		"containerUser": "root",
 		"timeout": 300,
 		"outputLimitBytes": 65536,

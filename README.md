@@ -213,7 +213,10 @@ keeps its bytes, and a binary one is refused rather than mangled.
 `sandbox-manager.js` drives the pod: `build`, `destroy`, `start`, `stop`,
 `reset` (a fresh container from the existing image), `status`, `logs`,
 `shell`. `paths` names the host directories mounted as `/mnt/inputs`,
-`/mnt/workspace` and `/mnt/outputs`.
+`/mnt/workspace` and `/mnt/outputs`. The pod joins its own podman network,
+`network`, created with `networkMtu`: rootless podman relays the pod's
+traffic through pasta, and a 65520 byte MTU lets it reach 10 Gbit/s where
+the default 1500 holds it near 300 MB/s.
 
 ### memory
 
